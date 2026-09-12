@@ -13,41 +13,72 @@
   </a>
 </div>
 
-{% if showcase %}
+{% if channel %}
 <div class="rounded-2xl p-6 mb-6 relative overflow-hidden" style="background:linear-gradient(135deg,#101a2b,#152847 55%,#1c3660); box-shadow:0 8px 24px rgba(16,26,43,.25);">
-  <div class="flex flex-wrap items-start justify-between gap-4 mb-5">
+  <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
     <div>
       <div class="inline-flex items-center gap-1.5 badge mb-2" style="background:rgba(255,255,255,.12);color:#bcd4f7;">
-        <span class="w-1.5 h-1.5 rounded-full" style="background:#3987e5"></span> AI SHOWCASE
+        <span class="w-1.5 h-1.5 rounded-full" style="background:#3987e5"></span> CHANNEL ROAS
       </div>
-      <h2 class="font-display text-xl font-bold text-white">AI bid agent &mdash; live experiment</h2>
+      <h2 class="font-display text-xl font-bold text-white">{{ brand }}'s overall performance{{ ' (AI showcase campaigns)' if channel.scoped_to_showcase else '' }}</h2>
       <p class="text-sm mt-1 max-w-2xl" style="color:#9fb3d1">
-        A deliberately single-variable test: the pacing schedule was paused so any ROAS movement can only be attributed to the AI bid agent.
-        Live since <span class="font-semibold text-white">{{ showcase.go_live }}</span> across
-        <span class="font-semibold text-white">{{ showcase.campaign_count }} campaigns</span>.
+        The whole channel's actual spend and sales, not just the keywords the AI touched. Pick the date a change went live, and how many days either side to compare.
       </p>
     </div>
-    <div class="flex gap-6 text-right">
-      <div>
-        <div class="text-[11px] uppercase tracking-wide" style="color:#7d93b5">Baseline ROAS (7d pre)</div>
-        <div class="font-display text-2xl font-bold text-white">{{ showcase.baseline_7d if showcase.baseline_7d is not none else '-' }}</div>
+  </div>
+
+  <form method="get" class="flex flex-wrap items-end gap-3 mb-4">
+    <input type="hidden" name="brand" value="{{ brand }}">
+    <input type="hidden" name="since_days" value="{{ since_days }}">
+    <div>
+      <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Action date (cutover)</label>
+      <select name="cutover" onchange="this.form.submit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+        {% for d in action_dates %}
+        <option value="{{ d }}" {{ 'selected' if d == channel.cutover_date|string else '' }} style="color:#111">{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Compare window</label>
+      <select name="window_days" onchange="this.form.submit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+        {% for d in [3,7,14,30] %}
+        <option value="{{ d }}" {{ 'selected' if d == channel.window_days else '' }} style="color:#111">{{ d }} days each side</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex rounded-lg overflow-hidden border" style="border-color:rgba(255,255,255,.15)">
+      {% for g in ['day','week','month'] %}
+      <button type="submit" name="granularity" value="{{ g }}" class="text-xs font-semibold px-3 py-1.5 capitalize"
+              style="{{ 'background:var(--brand);color:#fff;' if channel.granularity == g else 'background:rgba(255,255,255,.06);color:#9fb3d1;' }}">{{ g }}</button>
+      {% endfor %}
+    </div>
+  </form>
+
+  <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
+    <div style="height:220px"><canvas id="channelChart"></canvas></div>
+  </div>
+
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
+      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">Before &middot; {{ channel.window_days }} days up to {{ channel.cutover_date }}</div>
+      <div class="font-display text-2xl font-bold text-white">{{ channel.before_after.before.roas if channel.before_after.before.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span></div>
+      <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.before.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.before.sales) }} sales &middot; {{ channel.before_after.before.days }} days</div>
+    </div>
+    <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
+      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">After &middot; since {{ channel.cutover_date }}</div>
+      <div class="font-display text-2xl font-bold" style="color: {{ '#3ddc6a' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas > channel.before_after.before.roas else '#ff8a80' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas < channel.before_after.before.roas else '#fff' }}">
+        {{ channel.before_after.after.roas if channel.before_after.after.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span>
       </div>
-      <div>
-        <div class="text-[11px] uppercase tracking-wide" style="color:#7d93b5">Live ROAS since go-live</div>
-        <div class="font-display text-2xl font-bold" style="color: {{ '#3ddc6a' if showcase.live_roas and showcase.baseline_7d and showcase.live_roas > showcase.baseline_7d else '#ff8a80' if showcase.live_roas and showcase.baseline_7d and showcase.live_roas < showcase.baseline_7d else '#fff' }}">
-          {{ showcase.live_roas if showcase.live_roas is not none else '-' }}
-        </div>
-      </div>
+      <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.after.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.after.sales) }} sales &middot; {{ channel.before_after.after.days }} days</div>
     </div>
   </div>
-  <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
-    <div style="height:200px"><canvas id="showcaseChart"></canvas></div>
+
+  {% if channel.before_after.after_is_partial %}
+  <div class="rounded-lg mt-4 px-3 py-2.5 text-xs flex items-start gap-2" style="background:rgba(250,178,25,.12); color:#fddc9a;">
+    <svg class="w-4 h-4 flex-none mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+    <div>Only <strong>{{ channel.before_after.after.days }} of {{ channel.window_days }}</strong> "after" days have landed so far &mdash; and Blinkit revises the last ~2 days as more conversions come in. Treat this ROAS as provisional; it can still move once the full window and final data are in.</div>
   </div>
-  <div class="flex flex-wrap gap-2 text-xs">
-    <span class="badge" style="background:rgba(255,255,255,.08);color:#c7d5ea;">{{ showcase.excluded_count }} Teacher's Day campaigns intentionally excluded</span>
-    <span class="badge" style="background:rgba(255,255,255,.08);color:#c7d5ea;">Pacing schedule paused for a clean read</span>
-    <span class="badge" style="background:rgba(255,255,255,.08);color:#c7d5ea;">{{ showcase.live_days }} days live &middot; &#8377;{{ '{:,.0f}'.format(showcase.live_spend) }} spend tracked</span>
-  </div>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -87,6 +118,12 @@
 </div>
 {% endif %}
 
+{% if brand != ALL_BRANDS %}
+<div class="mb-3">
+  <div class="text-sm font-semibold text-ink">Per-keyword recommendations</div>
+  <p class="text-xs" style="color:var(--ink-muted)">A different, narrower view: only the keywords the AI actually recommended a change for, each compared 7 days before its own action date vs. 7 days after. Click a tile below to filter the table.</p>
+</div>
+{% endif %}
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
   <a href="{{ url_for('roas', brand=brand, since_days=since_days, search=search) }}" class="card p-5 block transition hover:shadow-md {{ 'ring-2' if not verdict else '' }}" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not verdict else '' }}">
     <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Recommendations</div>
@@ -126,7 +163,7 @@
 {% if daily_series %}
 <div class="card p-5 mb-6">
   <div class="flex items-center justify-between mb-3">
-    <div class="text-sm font-semibold text-ink">Verdicts over time</div>
+    <div class="text-sm font-semibold text-ink">Recommendation verdicts over time <span class="font-normal" style="color:var(--ink-muted)">(count of keywords, not spend)</span></div>
     <div class="flex items-center gap-4 text-xs" style="color:var(--ink-2)">
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--good)"></span>Improved</span>
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--critical)"></span>Worsened</span>
@@ -224,32 +261,50 @@
 </div>
 {% endblock %}
 {% block scripts %}
-{% if daily_series or showcase %}
+{% if daily_series or channel %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 {% endif %}
-{% if showcase %}
+{% if channel %}
 <script>
-const showcaseDaily = {{ showcase.daily|tojson }};
-new Chart(document.getElementById('showcaseChart'), {
+const trend = {{ channel.trend|tojson }};
+const cutoverLabel = {{ channel.cutover_label|tojson }};
+const isDayView = {{ (channel.granularity == 'day')|tojson }};
+
+// Week/month buckets can straddle the cutover date, so a clean before/after
+// color split only makes sense at day granularity - otherwise show one line.
+let datasets;
+if (isDayView) {
+  const cutoverIdx = trend.findIndex(d => d.label >= cutoverLabel);
+  const before = trend.map((d, i) => (cutoverIdx === -1 || i < cutoverIdx) ? d.roas : null);
+  const after = trend.map((d, i) => (cutoverIdx !== -1 && i >= cutoverIdx) ? d.roas : null);
+  if (cutoverIdx > 0) before[cutoverIdx] = trend[cutoverIdx].roas; // connect the segments visually
+  datasets = [
+    { label: 'Before', data: before, borderColor: '#7d93b5', backgroundColor: 'rgba(125,147,181,.12)',
+      borderWidth: 2, pointRadius: 0, tension: .25, fill: true, spanGaps: true },
+    { label: 'After (AI)', data: after, borderColor: '#3987e5', backgroundColor: 'rgba(57,135,229,.18)',
+      borderWidth: 2, pointRadius: 0, tension: .25, fill: true, spanGaps: true },
+  ];
+} else {
+  datasets = [
+    { label: 'ROAS', data: trend.map(d => d.roas), borderColor: '#3987e5', backgroundColor: 'rgba(57,135,229,.15)',
+      borderWidth: 2, pointRadius: 0, tension: .25, fill: true, spanGaps: true },
+  ];
+}
+
+new Chart(document.getElementById('channelChart'), {
   type: 'line',
   data: {
-    labels: showcaseDaily.map(d => d.date),
-    datasets: [{
-      label: 'Portfolio ROAS',
-      data: showcaseDaily.map(d => d.roas),
-      borderColor: '#3987e5', backgroundColor: 'rgba(57,135,229,.15)',
-      borderWidth: 2, pointRadius: 0, tension: .25, fill: true, spanGaps: true,
-    }]
+    labels: trend.map(d => d.label),
+    datasets,
   },
   options: {
     responsive: true, maintainAspectRatio: false,
     plugins: {
-      legend: { display: false },
+      legend: { display: true, labels: { color: '#c7d5ea', boxWidth: 10, font: { size: 11 } } },
       tooltip: { padding: 10, cornerRadius: 8 },
-      annotation: undefined,
     },
     scales: {
-      x: { grid: { display: false }, ticks: { color: '#9fb3d1', font: { size: 10 } } },
+      x: { grid: { display: false }, ticks: { color: '#9fb3d1', font: { size: 10 }, maxRotation: 0, autoSkip: true } },
       y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,.08)' }, ticks: { color: '#9fb3d1', font: { size: 10 } } },
     }
   }

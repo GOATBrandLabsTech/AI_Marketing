@@ -30,6 +30,12 @@
 </div>
 {% else %}
 
+<div class="card p-4 mb-6 text-sm leading-relaxed" style="color:var(--ink-2)">
+  <div class="font-semibold text-ink mb-1">How to read this page</div>
+  Pick a <strong>cutover date</strong> below &mdash; usually the day a bid change went live. For every keyword, we take its average daily spend/sales for the days <em>before</em> that date and compare it to the days <em>after</em>.
+  A keyword can look "worse" just because it barely spent anything (a single missing sale swings its ROAS wildly) &mdash; that's what the <strong>noise cutoff</strong> filters out, and why we show two summary numbers: a plain count of keywords, and the same count weighted by how much money was actually behind it. The weighted one is the one to trust.
+</div>
+
 <div class="rounded-xl px-4 py-3 mb-6 text-xs flex items-start gap-2" style="background:#fef3e2;color:#8a5a00;">
   <svg class="w-4 h-4 flex-none mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
   <div>Blinkit revises recent days as more conversions land &mdash; treat any date less than ~2 days old as provisional. Re-check this view in a couple of days before drawing firm conclusions.</div>

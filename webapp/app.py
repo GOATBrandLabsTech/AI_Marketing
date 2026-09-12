@@ -44,6 +44,16 @@ def current_brand():
     return request.args.get("brand") or session.get("brand") or "Voylla"
 
 
+@app.template_filter("steps")
+def split_steps(text):
+    """The LLM explanation is one long '||'-joined string, one segment per
+    decision step (STEP 1 · DECISION PATH, STEP 2 · DATA, ...) - split it so
+    each step renders as its own line instead of a wall of text."""
+    if not text:
+        return []
+    return [s.strip() for s in text.split("||") if s.strip()]
+
+
 def csv_response(rows, columns, filename):
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
@@ -128,7 +138,45 @@ def roas():
     since_date = date.today().fromordinal(date.today().toordinal() - since_days)
 
     brand_summary = queries.fetch_brand_summary(all_rows) if brand == queries.ALL_BRANDS else None
-    showcase = queries.fetch_chumbak_showcase() if brand == "Chumbak" else None
+
+    channel = None
+    action_dates = []
+    if brand != queries.ALL_BRANDS:
+        action_dates = queries.fetch_action_dates(brand)
+        default_cutover = date.fromisoformat(action_dates[0]) if action_dates else (date.today() - timedelta(days=1))
+        cutover_arg = request.args.get("cutover")
+        cutover_date = date.fromisoformat(cutover_arg) if cutover_arg else default_cutover
+        window_days = int(request.args.get("window_days", 7))
+        granularity = request.args.get("granularity", "day")
+        campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" else None
+
+        daily = queries.fetch_channel_daily(brand, days=365, campaign_ids=campaign_ids)
+        if granularity == "day":
+            # a year of individual days is illegible as a line chart - zoom
+            # the day view around the cutover; week/month keep the full year
+            # since bucketing already compresses it.
+            chart_start = cutover_date - timedelta(days=max(30, window_days * 3))
+            daily_for_chart = [d for d in daily if chart_start <= d["date"]]
+        else:
+            daily_for_chart = daily
+
+        if granularity == "week":
+            iso = cutover_date.isocalendar()
+            cutover_label = f"{iso[0]}-W{iso[1]:02d}"
+        elif granularity == "month":
+            cutover_label = cutover_date.strftime("%Y-%m")
+        else:
+            cutover_label = str(cutover_date)
+
+        channel = {
+            "trend": queries.bucket_channel_series(daily_for_chart, granularity),
+            "before_after": queries.channel_before_after(daily, cutover_date, window_days),
+            "cutover_date": cutover_date,
+            "cutover_label": cutover_label,
+            "window_days": window_days,
+            "granularity": granularity,
+            "scoped_to_showcase": bool(campaign_ids),
+        }
 
     return render_template(
         "roas.html",
@@ -140,7 +188,8 @@ def roas():
         verdict=verdict,
         search=search,
         brand_summary=brand_summary,
-        showcase=showcase,
+        channel=channel,
+        action_dates=action_dates,
         active="roas",
     )
 

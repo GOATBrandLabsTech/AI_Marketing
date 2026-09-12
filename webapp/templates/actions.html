@@ -78,7 +78,13 @@
         </tr>
         <tr id="row-{{ r.unique_key }}" class="hidden" style="background:var(--plane)">
           <td colspan="7" class="px-5 py-5">
-            <p class="text-xs mb-4 max-w-3xl leading-relaxed" style="color:var(--ink-2)">{{ r.explanation or 'No explanation recorded.' }}</p>
+            <div class="mb-4 max-w-3xl space-y-2">
+              {% for step in r.explanation|steps %}
+              <div class="text-xs leading-relaxed pl-3 py-0.5" style="color:var(--ink-2); border-left:2px solid var(--ring)">{{ step }}</div>
+              {% else %}
+              <div class="text-xs" style="color:var(--ink-muted)">No explanation recorded.</div>
+              {% endfor %}
+            </div>
             <div class="grid md:grid-cols-2 gap-4">
               <div class="card p-4">
                 <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Accept AI recommendation</div>

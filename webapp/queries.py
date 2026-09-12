@@ -135,6 +135,18 @@ ORDER BY a.action_date DESC, a.campaign_name, a.targeting
 """
 
 CAMPAIGN_STATUS_SQL = """
+WITH scoped AS (
+    -- filter to the brand(s) we actually want FIRST - Blinkit_Campaign_Runtime
+    -- accumulates one row per campaign per check, so this table can be large
+    -- and a per-row correlated subquery over the unfiltered table was slow
+    -- enough to make this page look like it hung.
+    SELECT *
+    FROM voylla."Blinkit_Campaign_Runtime"
+    WHERE (%(brand)s = '__ALL__' OR brand = %(brand)s)
+),
+latest_per_brand AS (
+    SELECT brand, MAX(log_date) AS max_log_date FROM scoped GROUP BY brand
+)
 SELECT DISTINCT ON (r.campaign_id)
        r.campaign_id::TEXT                AS campaign_id,
        r.campaign_name,
@@ -144,7 +156,8 @@ SELECT DISTINCT ON (r.campaign_id)
        COALESCE(e.window_count, 0)        AS window_count,
        e.next_start,
        e.last_end
-FROM voylla."Blinkit_Campaign_Runtime" r
+FROM scoped r
+JOIN latest_per_brand l ON l.brand = r.brand AND l.max_log_date = r.log_date
 LEFT JOIN (
     SELECT campaign_id,
            COUNT(*)        AS window_count,
@@ -153,8 +166,6 @@ LEFT JOIN (
     FROM voylla."Blinkit_Campaign_Schedule_Entries"
     GROUP BY campaign_id
 ) e ON r.campaign_id::TEXT = e.campaign_id
-WHERE r.log_date = (SELECT MAX(b2.log_date) FROM voylla."Blinkit_Campaign_Runtime" b2 WHERE b2.brand = r.brand)
-AND (%(brand)s = '__ALL__' OR r.brand = %(brand)s)
 ORDER BY r.campaign_id, r.last_checked DESC NULLS LAST
 """
 
@@ -192,56 +203,128 @@ def fetch_campaign_status(brand):
         return cur.fetchall()
 
 
-def fetch_chumbak_showcase():
-    """Portfolio-level daily ROAS for the Chumbak AI-bids-only experiment
-    (see CHUMBAK_SHOWCASE_* above), plus the pre-change 7/15/30-day baseline
-    computed the same way (sum(sales)/sum(spend) over the window, not an
-    average of daily ratios) so it is comparable to the live figure."""
-    go_live = CHUMBAK_SHOWCASE_GO_LIVE
+def fetch_channel_daily(brand, days=180, campaign_ids=None):
+    """Whole-channel (or campaign-scoped) daily performance straight from
+    Blinkit_Ads_Report, independent of any individual AI recommendation -
+    this is the actual portfolio ROAS. Also pulls ATC and New Users Acquired
+    and average keyword position, since those are the metrics the Power BI
+    Overview/Daily Report pages already track and were otherwise unused here.
+    """
+    start = date.today() - timedelta(days=days)
+    params = {"brand": brand, "start": start}
+    campaign_filter = ""
+    if campaign_ids:
+        campaign_filter = 'AND "Campaign ID" = ANY(%(campaign_ids)s)'
+        params["campaign_ids"] = campaign_ids
+
     with get_cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT
-                TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date AS report_date,
-                SUM("Estimated Budget Consumed")       AS spend,
-                SUM("Direct Sales" + "Indirect Sales")  AS sales
+                TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')::date AS report_date,
+                SUM("Estimated Budget Consumed")                  AS spend,
+                SUM("Direct Sales" + "Indirect Sales")            AS sales,
+                SUM("Impressions")                                AS impressions,
+                SUM("Direct ATC" + "Indirect ATC")                AS atc,
+                SUM("New Users Acquired")                         AS new_users,
+                AVG("Most Viewed Position")                       AS avg_position
             FROM voylla."Blinkit_Ads_Report"
-            WHERE "Brand" = 'Chumbak'
-              AND "Campaign ID" = ANY(%(ids)s)
+            WHERE "Brand" = %(brand)s
+              AND TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')::date >= %(start)s
+              {campaign_filter}
             GROUP BY 1
             ORDER BY 1
             """,
-            {"ids": CHUMBAK_SHOWCASE_CAMPAIGN_IDS},
+            params,
         )
         rows = cur.fetchall()
 
-    def window_roas(days):
-        start = go_live - timedelta(days=days)
-        spend = sum(float(r["spend"] or 0) for r in rows if start <= r["report_date"] < go_live)
-        sales = sum(float(r["sales"] or 0) for r in rows if start <= r["report_date"] < go_live)
-        return round(sales / spend, 2) if spend else None
+    out = []
+    for r in rows:
+        spend = float(r["spend"] or 0)
+        sales = float(r["sales"] or 0)
+        out.append({
+            "date": r["report_date"],
+            "spend": spend,
+            "sales": sales,
+            "roas": round(sales / spend, 2) if spend else None,
+            "impressions": int(r["impressions"] or 0),
+            "atc": int(r["atc"] or 0),
+            "new_users": int(r["new_users"] or 0),
+            "avg_position": round(float(r["avg_position"]), 1) if r["avg_position"] is not None else None,
+        })
+    return out
 
-    live_rows = [r for r in rows if r["report_date"] >= go_live]
-    live_spend = sum(float(r["spend"] or 0) for r in live_rows)
-    live_sales = sum(float(r["sales"] or 0) for r in live_rows)
 
-    return {
-        "go_live": go_live,
-        "campaign_count": len(CHUMBAK_SHOWCASE_CAMPAIGN_IDS),
-        "excluded_count": len(CHUMBAK_SHOWCASE_EXCLUDED_IDS),
-        "baseline_7d": window_roas(7),
-        "baseline_15d": window_roas(15),
-        "baseline_30d": window_roas(30),
-        "live_roas": round(live_sales / live_spend, 2) if live_spend else None,
-        "live_spend": round(live_spend, 2),
-        "live_days": len(live_rows),
-        "daily": [
-            {
-                "date": str(r["report_date"]),
-                "roas": round(float(r["sales"]) / float(r["spend"]), 2) if r["spend"] else None,
+def bucket_channel_series(daily, granularity="day"):
+    """Aggregates fetch_channel_daily's rows into week or month buckets -
+    ROAS is always recomputed from summed spend/sales (spend-weighted), never
+    averaged day-to-day, so a single huge day can't be diluted or a single
+    zero day can't crater the bucket."""
+    if granularity == "day":
+        return [dict(d, label=str(d["date"])) for d in daily]
+
+    buckets, order = {}, []
+    for d in daily:
+        dt = d["date"]
+        if granularity == "week":
+            iso = dt.isocalendar()
+            key = f"{iso[0]}-W{iso[1]:02d}"
+        else:
+            key = dt.strftime("%Y-%m")
+        if key not in buckets:
+            buckets[key] = {
+                "label": key, "spend": 0.0, "sales": 0.0, "impressions": 0,
+                "atc": 0, "new_users": 0, "_pos_sum": 0.0, "_pos_n": 0,
             }
-            for r in rows
-        ],
+            order.append(key)
+        b = buckets[key]
+        b["spend"] += d["spend"]
+        b["sales"] += d["sales"]
+        b["impressions"] += d["impressions"]
+        b["atc"] += d["atc"]
+        b["new_users"] += d["new_users"]
+        if d["avg_position"] is not None:
+            b["_pos_sum"] += d["avg_position"]
+            b["_pos_n"] += 1
+
+    out = []
+    for key in order:
+        b = buckets[key]
+        b["roas"] = round(b["sales"] / b["spend"], 2) if b["spend"] else None
+        b["avg_position"] = round(b["_pos_sum"] / b["_pos_n"], 1) if b["_pos_n"] else None
+        del b["_pos_sum"], b["_pos_n"]
+        out.append(b)
+    return out
+
+
+def channel_before_after(daily, cutover_date, window_days=7):
+    """Compares `window_days` days before the cutover to the days actually
+    available on/after it - if fewer than `window_days` have landed yet,
+    `after_is_partial` says so instead of silently padding with nothing, and
+    the ROAS is still spend-weighted rather than an average of daily ratios.
+    """
+    before = [d for d in daily if cutover_date - timedelta(days=window_days) <= d["date"] < cutover_date]
+    after = [d for d in daily if cutover_date <= d["date"] < cutover_date + timedelta(days=window_days)]
+
+    def agg(rows):
+        spend = sum(r["spend"] for r in rows)
+        sales = sum(r["sales"] for r in rows)
+        return {
+            "spend": round(spend, 2),
+            "sales": round(sales, 2),
+            "roas": round(sales / spend, 2) if spend else None,
+            "days": len(rows),
+            "atc": sum(r["atc"] for r in rows),
+            "new_users": sum(r["new_users"] for r in rows),
+        }
+
+    b, a = agg(before), agg(after)
+    return {
+        "before": b,
+        "after": a,
+        "window_days": window_days,
+        "after_is_partial": a["days"] < window_days,
     }
 
 
