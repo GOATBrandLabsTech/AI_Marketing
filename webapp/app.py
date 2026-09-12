@@ -50,7 +50,11 @@ def inject_globals():
         brands = queries.fetch_brands()
     except Exception:
         brands = ["Voylla", "Chumbak", "Petcrux"]
-    return {"brands": brands, "brand": current_brand()}
+    return {
+        "brands": brands,
+        "brand": current_brand(),
+        "ALL_BRANDS": queries.ALL_BRANDS,
+    }
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -86,26 +90,42 @@ def roas():
     verdict = request.args.get("verdict") or None
     search = request.args.get("search") or None
 
-    rows = queries.fetch_roas_impact(brand, since_days=since_days, verdict=verdict, search=search)
-    scoreable = [r for r in rows if r["verdict"]]
+    all_rows = queries.fetch_roas_impact(brand, since_days=since_days, search=search)
+    scoreable = [r for r in all_rows if r["verdict"]]
     changes = [float(r["roas_change"]) for r in scoreable if r["roas_change"] is not None]
     kpi = {
-        "total": len(rows),
+        "total": len(all_rows),
         "scoreable": len(scoreable),
         "improved": sum(1 for r in scoreable if r["verdict"] == "IMPROVED"),
         "worsened": sum(1 for r in scoreable if r["verdict"] == "WORSENED"),
         "flat": sum(1 for r in scoreable if r["verdict"] == "FLAT"),
         "avg_roas_change": (sum(changes) / len(changes)) if changes else None,
     }
+
+    daily = {}
+    for r in scoreable:
+        d = str(r["action_date"])
+        bucket = daily.setdefault(d, {"date": d, "improved": 0, "worsened": 0, "flat": 0})
+        bucket[r["verdict"].lower()] += 1
+    daily_series = [daily[d] for d in sorted(daily.keys())]
+
+    rows = [r for r in all_rows if not verdict or r["verdict"] == verdict]
     since_date = date.today().fromordinal(date.today().toordinal() - since_days)
+
+    brand_summary = queries.fetch_brand_summary(all_rows) if brand == queries.ALL_BRANDS else None
+    showcase = queries.fetch_chumbak_showcase() if brand == "Chumbak" else None
+
     return render_template(
         "roas.html",
         rows=rows,
         kpi=kpi,
+        daily_series=daily_series,
         since_days=since_days,
         since_date=since_date,
         verdict=verdict,
         search=search,
+        brand_summary=brand_summary,
+        showcase=showcase,
         active="roas",
     )
 
@@ -115,6 +135,15 @@ def roas():
 def actions():
     brand = current_brand()
     session["brand"] = brand
+
+    if brand == queries.ALL_BRANDS:
+        choices = []
+        for b in queries.fetch_brands():
+            d = queries.fetch_latest_action_date(b)
+            count = len(queries.fetch_pending_actions(b, d)) if d else 0
+            choices.append({"brand": b, "action_date": d, "count": count})
+        return render_template("actions.html", chooser=choices, active="actions")
+
     action_date = queries.fetch_latest_action_date(brand)
     rows = queries.fetch_pending_actions(brand, action_date) if action_date else []
     return render_template(
@@ -160,7 +189,17 @@ def campaigns():
     brand = current_brand()
     session["brand"] = brand
     rows = queries.fetch_campaign_status(brand)
-    return render_template("campaigns.html", rows=rows, active="campaigns")
+
+    status_counts = {}
+    for r in rows:
+        status_counts[r["last_status"]] = status_counts.get(r["last_status"], 0) + 1
+
+    return render_template(
+        "campaigns.html",
+        rows=rows,
+        status_counts=status_counts,
+        active="campaigns",
+    )
 
 
 @app.route("/api/schedule/<campaign_id>")

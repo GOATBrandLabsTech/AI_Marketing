@@ -1,97 +1,117 @@
 {% extends "base.html" %}
 {% block title %}Pending Actions - Blinkit Control{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-6">
+<div class="flex items-center justify-between mb-7">
   <div>
-    <h1 class="text-2xl font-bold text-ink">Pending Actions</h1>
-    <p class="text-sm text-slate-500">
-      {{ rows|length }} AI recommendations for {{ action_date }} &middot; {{ brand }}.
+    <h1 class="page-title text-2xl font-bold text-ink">Pending Actions</h1>
+    {% if chooser %}
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Pick a brand to review its AI recommendations.</p>
+    {% else %}
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">
+      {{ rows|length }} AI recommendations for <span class="font-semibold text-ink">{{ action_date }}</span> &middot; {{ brand }}.
       Accept, adjust the CPM change, or override the action entirely.
     </p>
+    {% endif %}
   </div>
 </div>
 
+{% if chooser %}
+<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  {% for c in chooser %}
+  <a href="{{ url_for('actions', brand=c.brand) }}" class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
+    <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">{{ c.brand }}</div>
+    <div class="font-display text-2xl font-bold text-ink">{{ c.count }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">
+      {% if c.action_date %}recommendations for {{ c.action_date }}{% else %}no recommendations yet{% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
 <div class="card overflow-hidden">
   <div class="overflow-x-auto max-h-[75vh]">
     <table class="data w-full text-sm">
       <thead>
-        <tr class="text-left text-slate-500 border-b border-slate-200">
-          <th class="px-3 py-2">Campaign</th>
-          <th class="px-3 py-2">Keyword</th>
-          <th class="px-3 py-2">AI action</th>
-          <th class="px-3 py-2 text-right">CPM</th>
-          <th class="px-3 py-2 text-right">Confidence</th>
-          <th class="px-3 py-2">Status</th>
-          <th class="px-3 py-2"></th>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-4 py-3">Campaign</th>
+          <th class="px-4 py-3">Keyword</th>
+          <th class="px-4 py-3">AI action</th>
+          <th class="px-4 py-3 text-right">CPM</th>
+          <th class="px-4 py-3 text-right">Confidence</th>
+          <th class="px-4 py-3">Status</th>
+          <th class="px-4 py-3"></th>
         </tr>
       </thead>
       <tbody>
         {% for r in rows %}
-        <tr class="border-b border-slate-100 hover:bg-slate-50">
-          <td class="px-3 py-2">{{ r.campaign_name }}</td>
-          <td class="px-3 py-2">{{ r.targeting }}</td>
-          <td class="px-3 py-2 whitespace-nowrap">
+        <tr class="border-b" style="border-color:var(--grid)">
+          <td class="px-4 py-2.5 font-medium">{{ r.campaign_name }}</td>
+          <td class="px-4 py-2.5">{{ r.targeting }}</td>
+          <td class="px-4 py-2.5 whitespace-nowrap">
             {{ r.action }}
             {% if r.rule_action and r.rule_action != '' and r.rule_action != r.action %}
-              <span class="badge bg-amber-100 text-amber-700 ml-1" title="Rule engine wanted {{ r.rule_action }}">diverged</span>
+              <span class="badge" style="background:#fef3e2;color:#8a5a00;" title="Rule engine wanted {{ r.rule_action }}"><span class="dot" style="background:var(--warning)"></span>diverged</span>
             {% endif %}
           </td>
-          <td class="px-3 py-2 text-right">{{ r.current_cpm }}{% if r.bid_change %} (Δ{{ r.bid_change }}){% endif %}</td>
-          <td class="px-3 py-2 text-right">{{ r.confidence if r.confidence is not none else '-' }}</td>
-          <td class="px-3 py-2">
-            {% if r.override_action %}<span class="badge bg-purple-100 text-purple-700">override: {{ r.override_action }}</span>
-            {% elif r.user_implemented == 'true' %}<span class="badge bg-emerald-100 text-emerald-700">accepted</span>
-            {% elif r.user_implemented == 'false' %}<span class="badge bg-slate-200 text-slate-600">rejected</span>
-            {% else %}<span class="badge bg-slate-100 text-slate-400">undecided</span>{% endif %}
+          <td class="px-4 py-2.5 text-right whitespace-nowrap">{{ r.current_cpm }}{% if r.bid_change %} <span style="color:var(--ink-muted)">(&Delta;{{ r.bid_change }})</span>{% endif %}</td>
+          <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.confidence if r.confidence is not none else '-' }}</td>
+          <td class="px-4 py-2.5">
+            {% if r.override_action %}<span class="badge" style="background:#efeafb;color:#5b3fb8;"><span class="dot" style="background:#4a3aa7"></span>override: {{ r.override_action }}</span>
+            {% elif r.user_implemented == 'true' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>accepted</span>
+            {% elif r.user_implemented == 'false' %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>rejected</span>
+            {% else %}<span class="badge" style="background:#f2f2f0;color:var(--ink-muted);"><span class="dot" style="background:#d5d4cf"></span>undecided</span>{% endif %}
           </td>
-          <td class="px-3 py-2 text-right">
-            <button onclick="toggleRow('row-{{ r.unique_key }}')" class="text-brand-600 hover:text-brand-700 text-xs font-semibold">Review</button>
+          <td class="px-4 py-2.5 text-right">
+            <button onclick="toggleRow('row-{{ r.unique_key }}')" class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)" onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'">Review</button>
           </td>
         </tr>
-        <tr id="row-{{ r.unique_key }}" class="hidden bg-slate-50 border-b border-slate-100">
-          <td colspan="7" class="px-4 py-4">
-            <p class="text-xs text-slate-500 mb-3 max-w-3xl">{{ r.explanation or 'No explanation recorded.' }}</p>
+        <tr id="row-{{ r.unique_key }}" class="hidden" style="background:var(--plane)">
+          <td colspan="7" class="px-5 py-5">
+            <p class="text-xs mb-4 max-w-3xl leading-relaxed" style="color:var(--ink-2)">{{ r.explanation or 'No explanation recorded.' }}</p>
             <div class="grid md:grid-cols-2 gap-4">
-              <div class="border border-slate-200 rounded-lg p-3 bg-white">
-                <div class="text-xs font-semibold text-slate-600 mb-2">Accept AI recommendation</div>
-                <label class="flex items-center gap-2 text-sm mb-2">
-                  <input type="checkbox" id="accept-chk-{{ r.unique_key }}" {{ 'checked' if r.user_implemented == 'true' else '' }}>
+              <div class="card p-4">
+                <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Accept AI recommendation</div>
+                <label class="flex items-center gap-2 text-sm mb-3">
+                  <input type="checkbox" id="accept-chk-{{ r.unique_key }}" {{ 'checked' if r.user_implemented == 'true' else '' }} class="w-4 h-4 rounded" style="accent-color:var(--brand)">
                   Implement as-is
                 </label>
-                <label class="text-xs text-slate-500 block mb-1">CPM override %</label>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">CPM override %</label>
                 <input type="number" step="0.1" id="accept-cpm-{{ r.unique_key }}" value="{{ r.cpm_llm_override if r.cpm_llm_override is not none else '' }}"
-                       class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5 mb-2">
-                <label class="text-xs text-slate-500 block mb-1">Note</label>
-                <textarea id="accept-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5 mb-2">{{ r.override_note or '' }}</textarea>
-                <button class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold rounded-lg px-3 py-1.5"
+                       class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Note</label>
+                <textarea id="accept-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">{{ r.override_note or '' }}</textarea>
+                <button class="text-white text-xs font-semibold rounded-lg px-3.5 py-2 transition" style="background:var(--brand);"
+                        onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'"
                         onclick="submitAccept('{{ r.unique_key }}')">Save</button>
               </div>
-              <div class="border border-slate-200 rounded-lg p-3 bg-white">
-                <div class="text-xs font-semibold text-slate-600 mb-2">Override action</div>
-                <label class="text-xs text-slate-500 block mb-1">New action</label>
-                <select id="override-action-{{ r.unique_key }}" class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5 mb-2">
+              <div class="card p-4">
+                <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Override action</div>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">New action</label>
+                <select id="override-action-{{ r.unique_key }}" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
                   {% for opt in action_options %}
                   <option value="{{ opt }}" {{ 'selected' if opt == r.override_action else '' }}>{{ opt }}</option>
                   {% endfor %}
                 </select>
-                <label class="text-xs text-slate-500 block mb-1">CPM change %</label>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">CPM change %</label>
                 <input type="number" step="0.1" id="override-cpm-{{ r.unique_key }}" value="{{ r.cpm_change_user if r.cpm_change_user is not none else '' }}"
-                       class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5 mb-2">
-                <label class="text-xs text-slate-500 block mb-1">Note</label>
-                <textarea id="override-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5 mb-2">{{ r.override_note or '' }}</textarea>
-                <button class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg px-3 py-1.5"
+                       class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Note</label>
+                <textarea id="override-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">{{ r.override_note or '' }}</textarea>
+                <button class="text-white text-xs font-semibold rounded-lg px-3.5 py-2 transition" style="background:#1c1d20;"
+                        onmouseover="this.style.background='#000'" onmouseout="this.style.background='#1c1d20'"
                         onclick="submitOverride('{{ r.unique_key }}')">Save override</button>
               </div>
             </div>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="px-3 py-8 text-center text-slate-400">No recommendations for this date.</td></tr>
+        <tr><td colspan="7" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No recommendations for this date.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>

@@ -4,62 +4,100 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Blinkit Marketing Control{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
     theme: {
       extend: {
         colors: {
-          ink: '#0f172a',
-          brand: { 50:'#eff6ff',100:'#dbeafe',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8' }
-        }
+          ink: '#0b0b0b',
+          brand: { 50:'#eaf1fc',100:'#cde2fb',400:'#3987e5',500:'#2a78d6',600:'#256abf',700:'#1c5cab' },
+        },
+        boxShadow: { soft: '0 1px 2px rgba(11,11,11,.04), 0 1px 1px rgba(11,11,11,.03)' }
       }
     }
   }
 </script>
 <style>
-  body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
-  .badge { display:inline-flex; align-items:center; padding:.15rem .55rem; border-radius:9999px; font-size:.72rem; font-weight:600; letter-spacing:.02em; }
-  .card { background:#fff; border:1px solid #e2e8f0; border-radius:.75rem; box-shadow:0 1px 2px rgba(15,23,42,.04); }
-  table.data th { position: sticky; top: 0; background:#f8fafc; z-index:1; }
+  :root{
+    --surface:#fcfcfb; --plane:#f4f4f2; --ink:#0b0b0b; --ink-2:#52514e; --ink-muted:#898781;
+    --grid:#e8e7e2; --ring:rgba(11,11,11,.08);
+    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+    --brand:#2a78d6; --brand-dark:#1c5cab;
+  }
+  * { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+  body { background: var(--plane); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .font-display, .brand-mark, h1.page-title, .kpi-value, .stat-value {
+    font-family: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .card { background: var(--surface); border:1px solid var(--ring); border-radius:.9rem; box-shadow: 0 1px 2px rgba(11,11,11,.04), 0 1px 1px rgba(11,11,11,.03); }
+  .badge { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .6rem; border-radius:9999px; font-size:.72rem; font-weight:600; letter-spacing:.01em; white-space:nowrap; }
+  .badge .dot { width:6px; height:6px; border-radius:9999px; flex:none; }
+  table.data th { position: sticky; top:0; background: var(--surface); z-index:1; font-size:.71rem; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-muted); font-weight:700; }
+  table.data tbody tr:nth-child(even) { background: rgba(11,11,11,.014); }
+  table.data tbody tr:hover { background: var(--brand-50, #eaf1fc); }
+  .navlink { position:relative; display:flex; align-items:center; gap:.6rem; padding:.55rem .75rem; border-radius:.6rem; font-size:.875rem; font-weight:500; color:#c3c2b7; transition:.15s; }
+  .navlink:hover { background:rgba(255,255,255,.06); color:#fff; }
+  .navlink.active { background:rgba(42,120,214,.18); color:#fff; }
+  .navlink.active::before { content:''; position:absolute; left:-12px; top:50%; transform:translateY(-50%); width:3px; height:20px; border-radius:3px; background:var(--brand-400,#3987e5); }
+  .navlink svg { width:18px; height:18px; flex:none; opacity:.9; }
   ::-webkit-scrollbar { height:8px; width:8px; }
-  ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+  ::-webkit-scrollbar-thumb { background:#d8d7d1; border-radius:4px; }
+  ::-webkit-scrollbar-thumb:hover { background:#c3c2b7; }
+  input[type=text], input[type=number], input[type=password], input[type=date], select, textarea {
+    background: var(--surface);
+  }
+  input:focus, select:focus, textarea:focus { outline:none; box-shadow: 0 0 0 3px rgba(42,120,214,.18); border-color: var(--brand) !important; }
 </style>
 </head>
-<body class="bg-slate-100 text-slate-900">
+<body>
 {% if session.get('authed') %}
 <div class="min-h-screen flex">
-  <aside class="w-60 shrink-0 bg-ink text-slate-200 flex flex-col">
-    <div class="px-5 py-5 border-b border-slate-700/60">
-      <div class="text-white font-bold text-lg leading-tight">Blinkit Control</div>
-      <div class="text-xs text-slate-400">AI marketing automation</div>
+  <aside class="w-64 shrink-0 flex flex-col" style="background:#111214;">
+    <div class="px-5 py-6 flex items-center gap-3">
+      <div class="font-display w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white text-base" style="background:linear-gradient(135deg,#3987e5,#1c5cab);">B</div>
+      <div>
+        <div class="font-display text-white font-bold text-[15px] leading-tight">Blinkit Control</div>
+        <div class="text-[11px] text-slate-500">AI marketing automation</div>
+      </div>
     </div>
-    <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
-      <a href="{{ url_for('roas', brand=brand) }}" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 {{ 'bg-slate-800 text-white' if active=='roas' else '' }}">
+    <nav class="flex-1 px-4 pt-2 space-y-1">
+      <a href="{{ url_for('roas', brand=brand) }}" class="navlink {{ 'active' if active=='roas' else '' }}">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v16a2 2 0 002 2h16M7 14l4-4 3 3 5-6"/></svg>
         <span>ROAS Impact</span>
       </a>
-      <a href="{{ url_for('actions', brand=brand) }}" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 {{ 'bg-slate-800 text-white' if active=='actions' else '' }}">
+      <a href="{{ url_for('actions', brand=brand) }}" class="navlink {{ 'active' if active=='actions' else '' }}">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
         <span>Pending Actions</span>
       </a>
-      <a href="{{ url_for('campaigns', brand=brand) }}" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 {{ 'bg-slate-800 text-white' if active=='campaigns' else '' }}">
+      <a href="{{ url_for('campaigns', brand=brand) }}" class="navlink {{ 'active' if active=='campaigns' else '' }}">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
         <span>Campaigns &amp; Budget</span>
       </a>
     </nav>
-    <div class="px-3 py-4 border-t border-slate-700/60">
+    <div class="px-4 py-4 mt-auto border-t border-white/10">
       <form method="get" action="{{ request.path }}" class="mb-3">
-        <label class="text-xs text-slate-400 block mb-1">Brand</label>
-        <select name="brand" onchange="this.form.submit()" class="w-full rounded-lg bg-slate-800 text-white text-sm px-2 py-1.5 border border-slate-700">
+        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">Brand</label>
+        <select name="brand" onchange="this.form.submit()" class="w-full rounded-lg text-white text-sm px-2.5 py-2 border border-white/10" style="background:#1c1d20;">
+          <option value="{{ ALL_BRANDS }}" {{ 'selected' if brand == ALL_BRANDS else '' }}>All Brands</option>
           {% for b in brands %}
             <option value="{{ b }}" {{ 'selected' if b == brand else '' }}>{{ b }}</option>
           {% endfor %}
         </select>
       </form>
-      <a href="{{ url_for('logout') }}" class="text-xs text-slate-400 hover:text-white">Sign out</a>
+      <a href="{{ url_for('logout') }}" class="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-white transition">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 5v1a3 3 0 01-3 3H6a3 3 0 01-3-3V6a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+        Sign out
+      </a>
     </div>
   </aside>
   <main class="flex-1 min-w-0">
-    <div id="toast" class="hidden fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg"></div>
-    <div class="p-6 lg:p-8">
+    <div id="toast" class="hidden fixed top-4 right-4 z-50 max-w-sm rounded-xl px-4 py-3 text-sm font-medium shadow-lg"></div>
+    <div class="p-6 lg:p-9 max-w-[1400px] mx-auto">
       {% block content %}{% endblock %}
     </div>
   </main>

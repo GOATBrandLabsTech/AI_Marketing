@@ -6,11 +6,25 @@ reproduce the exact Patch() logic those two canvas apps used, so this
 dashboard writes to the same columns the same way and the existing scheduled
 notebooks (Blinkit_Campaign_Control.ipynb etc.) keep working unchanged.
 """
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from db import get_cursor
 
 ACTION_OPTIONS = ["NO_CHANGE", "INCREASE_CPM", "DECREASE_CPM", "PAUSE", "ZOMBIE_FLAG"]
+
+ALL_BRANDS = "__ALL__"
+
+# The Chumbak AI-bids-only experiment: a deliberately single-variable test of
+# the bid agent (pacing schedule paused so the ROAS delta is attributable to
+# the agent alone). Live from 2026-09-10 across these 12 campaigns; 4
+# Teacher's Day campaigns were excluded on purpose since they were already
+# stopped and the agent wanted to raise zero-ROAS bids on them.
+CHUMBAK_SHOWCASE_CAMPAIGN_IDS = [
+    354499, 354509, 359470, 359869, 379520, 429819,
+    497432, 497437, 500151, 607078, 607168, 624587,
+]
+CHUMBAK_SHOWCASE_EXCLUDED_IDS = [640511, 640513, 640515, 640517]
+CHUMBAK_SHOWCASE_GO_LIVE = date(2026, 9, 10)
 
 ROAS_IMPACT_SQL = """
 WITH actions AS (
@@ -62,7 +76,7 @@ WITH actions AS (
             ELSE NULL
         END                                       AS cpm_intended
     FROM voylla."Blinkit_actions_llm" l
-    WHERE l."Brand" = %(brand)s
+    WHERE (%(brand)s = '__ALL__' OR l."Brand" = %(brand)s)
       AND l.action_date ~ '^\\d{4}-\\d{2}-\\d{2}'
       AND l.action_date::date >= %(since)s
 ),
@@ -75,7 +89,7 @@ performance AS (
         SUM("Direct Sales" + "Indirect Sales")     AS sales,
         SUM("Impressions")                         AS impressions
     FROM voylla."Blinkit_Ads_Report"
-    WHERE "Brand" = %(brand)s
+    WHERE (%(brand)s = '__ALL__' OR "Brand" = %(brand)s)
     GROUP BY 1, 2, 3
 ),
 windows AS (
@@ -139,8 +153,8 @@ LEFT JOIN (
     FROM voylla."Blinkit_Campaign_Schedule_Entries"
     GROUP BY campaign_id
 ) e ON r.campaign_id::TEXT = e.campaign_id
-WHERE r.log_date = (SELECT MAX(log_date) FROM voylla."Blinkit_Campaign_Runtime" WHERE brand = %(brand)s)
-AND r.brand = %(brand)s
+WHERE r.log_date = (SELECT MAX(b2.log_date) FROM voylla."Blinkit_Campaign_Runtime" b2 WHERE b2.brand = r.brand)
+AND (%(brand)s = '__ALL__' OR r.brand = %(brand)s)
 ORDER BY r.campaign_id, r.last_checked DESC NULLS LAST
 """
 
@@ -176,6 +190,83 @@ def fetch_campaign_status(brand):
     with get_cursor() as cur:
         cur.execute(CAMPAIGN_STATUS_SQL, {"brand": brand})
         return cur.fetchall()
+
+
+def fetch_chumbak_showcase():
+    """Portfolio-level daily ROAS for the Chumbak AI-bids-only experiment
+    (see CHUMBAK_SHOWCASE_* above), plus the pre-change 7/15/30-day baseline
+    computed the same way (sum(sales)/sum(spend) over the window, not an
+    average of daily ratios) so it is comparable to the live figure."""
+    go_live = CHUMBAK_SHOWCASE_GO_LIVE
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date AS report_date,
+                SUM("Estimated Budget Consumed")       AS spend,
+                SUM("Direct Sales" + "Indirect Sales")  AS sales
+            FROM voylla."Blinkit_Ads_Report"
+            WHERE "Brand" = 'Chumbak'
+              AND "Campaign ID" = ANY(%(ids)s)
+            GROUP BY 1
+            ORDER BY 1
+            """,
+            {"ids": CHUMBAK_SHOWCASE_CAMPAIGN_IDS},
+        )
+        rows = cur.fetchall()
+
+    def window_roas(days):
+        start = go_live - timedelta(days=days)
+        spend = sum(float(r["spend"] or 0) for r in rows if start <= r["report_date"] < go_live)
+        sales = sum(float(r["sales"] or 0) for r in rows if start <= r["report_date"] < go_live)
+        return round(sales / spend, 2) if spend else None
+
+    live_rows = [r for r in rows if r["report_date"] >= go_live]
+    live_spend = sum(float(r["spend"] or 0) for r in live_rows)
+    live_sales = sum(float(r["sales"] or 0) for r in live_rows)
+
+    return {
+        "go_live": go_live,
+        "campaign_count": len(CHUMBAK_SHOWCASE_CAMPAIGN_IDS),
+        "excluded_count": len(CHUMBAK_SHOWCASE_EXCLUDED_IDS),
+        "baseline_7d": window_roas(7),
+        "baseline_15d": window_roas(15),
+        "baseline_30d": window_roas(30),
+        "live_roas": round(live_sales / live_spend, 2) if live_spend else None,
+        "live_spend": round(live_spend, 2),
+        "live_days": len(live_rows),
+        "daily": [
+            {
+                "date": str(r["report_date"]),
+                "roas": round(float(r["sales"]) / float(r["spend"]), 2) if r["spend"] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+def fetch_brand_summary(rows):
+    """Groups already-fetched ROAS-impact rows by brand for the 'All Brands'
+    overview - no extra query, just a reduction over what fetch_roas_impact
+    already returned."""
+    summary = {}
+    for r in rows:
+        b = r.get("Brand")
+        bucket = summary.setdefault(
+            b, {"brand": b, "total": 0, "improved": 0, "worsened": 0, "flat": 0, "changes": []}
+        )
+        bucket["total"] += 1
+        if r["verdict"]:
+            bucket[r["verdict"].lower()] += 1
+            if r["roas_change"] is not None:
+                bucket["changes"].append(float(r["roas_change"]))
+    out = []
+    for b in sorted(summary.keys(), key=lambda x: x or ""):
+        bucket = summary[b]
+        changes = bucket.pop("changes")
+        bucket["avg_roas_change"] = round(sum(changes) / len(changes), 2) if changes else None
+        out.append(bucket)
+    return out
 
 
 def fetch_latest_action_date(brand):

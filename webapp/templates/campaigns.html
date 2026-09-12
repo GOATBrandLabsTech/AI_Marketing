@@ -1,10 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Campaigns & Budget - Blinkit Control{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-6">
+<div class="flex items-center justify-between mb-7">
   <div>
-    <h1 class="text-2xl font-bold text-ink">Campaigns &amp; Budget</h1>
-    <p class="text-sm text-slate-500">Live campaign status plus the run-time windows that pace each campaign's budget.</p>
+    <h1 class="page-title text-2xl font-bold text-ink">Campaigns &amp; Budget</h1>
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Live campaign status plus the run-time windows that pace each campaign's budget.</p>
+  </div>
+</div>
+
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+  <div class="card p-4">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--good)"></span>Active</div>
+    <div class="font-display text-2xl font-bold" style="color:var(--good)">{{ status_counts.get('ACTIVE', 0) }}</div>
+  </div>
+  <div class="card p-4">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--warning)"></span>Stopped / on hold</div>
+    <div class="font-display text-2xl font-bold" style="color:#8a5a00">{{ status_counts.get('STOPPED', 0) + status_counts.get('ON_HOLD', 0) }}</div>
+  </div>
+  <div class="card p-4">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span>Budget exhausted</div>
+    <div class="font-display text-2xl font-bold" style="color:var(--critical)">{{ status_counts.get('BUDGET_EXHAUSTED', 0) }}</div>
+  </div>
+  <div class="card p-4">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span>Total campaigns</div>
+    <div class="font-display text-2xl font-bold text-ink">{{ rows|length }}</div>
   </div>
 </div>
 
@@ -12,53 +31,63 @@
   <div class="overflow-x-auto max-h-[75vh]">
     <table class="data w-full text-sm">
       <thead>
-        <tr class="text-left text-slate-500 border-b border-slate-200">
-          <th class="px-3 py-2">Campaign</th>
-          <th class="px-3 py-2 text-right">Budget</th>
-          <th class="px-3 py-2">Status</th>
-          <th class="px-3 py-2 text-right">Windows</th>
-          <th class="px-3 py-2">Next start</th>
-          <th class="px-3 py-2">Last end</th>
-          <th class="px-3 py-2"></th>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          {% if brand == ALL_BRANDS %}<th class="px-4 py-3">Brand</th>{% endif %}
+          <th class="px-4 py-3">Campaign</th>
+          <th class="px-4 py-3 text-right">Budget</th>
+          <th class="px-4 py-3">Status</th>
+          <th class="px-4 py-3 text-right">Windows</th>
+          <th class="px-4 py-3">Next start</th>
+          <th class="px-4 py-3">Last end</th>
+          <th class="px-4 py-3"></th>
         </tr>
       </thead>
       <tbody>
         {% for r in rows %}
-        <tr class="border-b border-slate-100 hover:bg-slate-50">
-          <td class="px-3 py-2">{{ r.campaign_name }}<div class="text-xs text-slate-400">#{{ r.campaign_id }}</div></td>
-          <td class="px-3 py-2 text-right">{{ r.budget if r.budget is not none else '-' }}</td>
-          <td class="px-3 py-2">
-            {% if r.last_status == 'BUDGET_EXHAUSTED' %}<span class="badge bg-red-100 text-red-700">{{ r.last_status }}</span>
-            {% elif r.last_status in ['ON_HOLD','STOPPED'] %}<span class="badge bg-amber-100 text-amber-700">{{ r.last_status }}</span>
-            {% elif r.last_status %}<span class="badge bg-emerald-100 text-emerald-700">{{ r.last_status }}</span>
-            {% else %}<span class="text-slate-300">-</span>{% endif %}
+        <tr class="border-b" style="border-color:var(--grid)">
+          {% if brand == ALL_BRANDS %}<td class="px-4 py-2.5" style="color:var(--ink-2)">{{ r.brand }}</td>{% endif %}
+          <td class="px-4 py-2.5">
+            <div class="font-medium">{{ r.campaign_name }}</div>
+            <div class="text-xs" style="color:var(--ink-muted)">#{{ r.campaign_id }}</div>
           </td>
-          <td class="px-3 py-2 text-right">{{ r.window_count }}</td>
-          <td class="px-3 py-2 whitespace-nowrap">{{ r.next_start or '-' }}</td>
-          <td class="px-3 py-2 whitespace-nowrap">{{ r.last_end or '-' }}</td>
-          <td class="px-3 py-2 text-right">
-            <button onclick="openSchedule('{{ r.campaign_id }}','{{ r.campaign_name|e }}','{{ r.brand }}')" class="text-brand-600 hover:text-brand-700 text-xs font-semibold">Manage</button>
+          <td class="px-4 py-2.5 text-right font-medium">{{ r.budget if r.budget is not none else '-' }}</td>
+          <td class="px-4 py-2.5">
+            {% if r.last_status == 'BUDGET_EXHAUSTED' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>{{ r.last_status }}</span>
+            {% elif r.last_status in ['ON_HOLD','STOPPED'] %}<span class="badge" style="background:#fef3e2;color:#8a5a00;"><span class="dot" style="background:var(--warning)"></span>{{ r.last_status }}</span>
+            {% elif r.last_status == 'ACTIVE' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>{{ r.last_status }}</span>
+            {% elif r.last_status %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>{{ r.last_status }}</span>
+            {% else %}<span style="color:#d5d4cf">-</span>{% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right">{{ r.window_count }}</td>
+          <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.next_start or '-' }}</td>
+          <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.last_end or '-' }}</td>
+          <td class="px-4 py-2.5 text-right">
+            <button onclick="openSchedule('{{ r.campaign_id }}','{{ r.campaign_name|e }}','{{ r.brand }}')"
+                    class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)"
+                    onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'">Manage</button>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="px-3 py-8 text-center text-slate-400">No campaigns found for this brand.</td></tr>
+        <tr><td colspan="{{ 8 if brand == ALL_BRANDS else 7 }}" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No campaigns found for this brand.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
-<div id="scheduleModal" class="hidden fixed inset-0 bg-slate-900/50 z-40 flex items-center justify-center p-4">
+<div id="scheduleModal" class="hidden fixed inset-0 z-40 flex items-center justify-center p-4" style="background:rgba(11,11,11,.45); backdrop-filter:blur(2px);">
   <div class="card w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center justify-between mb-5">
       <div>
         <div class="text-lg font-bold text-ink" id="modalCampaignName"></div>
-        <div class="text-xs text-slate-400">Budget windows</div>
+        <div class="text-xs font-semibold uppercase tracking-wide" style="color:var(--ink-muted)">Budget windows</div>
       </div>
-      <button onclick="closeSchedule()" class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+      <button onclick="closeSchedule()" class="text-xl leading-none w-8 h-8 rounded-lg flex items-center justify-center transition" style="color:var(--ink-muted)"
+              onmouseover="this.style.background='var(--plane)'" onmouseout="this.style.background='transparent'">&times;</button>
     </div>
     <div id="scheduleEntries" class="space-y-3"></div>
-    <button onclick="addWindow()" class="mt-4 bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold rounded-lg px-3 py-2">+ Add window</button>
+    <button onclick="addWindow()" class="mt-4 text-white text-xs font-semibold rounded-lg px-4 py-2.5 transition" style="background:var(--brand);"
+            onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">+ Add window</button>
   </div>
 </div>
 {% endblock %}
@@ -71,38 +100,38 @@ function entryTemplate(e) {
   const hours = [...Array(25).keys()];
   const opt = (v, sel) => `<option value="${v}" ${Number(sel)===v?'selected':''}>${String(v).padStart(2,'0')}:00</option>`;
   return `
-  <div class="border border-slate-200 rounded-lg p-3" data-entry="${e.entry_id}">
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
+  <div class="rounded-xl p-4" style="border:1px solid var(--ring)" data-entry="${e.entry_id}">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
       <div>
-        <label class="text-xs text-slate-500 block mb-1">From</label>
-        <input type="date" class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5" value="${e.start_date || ''}" data-field="start_date">
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">From</label>
+        <input type="date" class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" value="${e.start_date || ''}" data-field="start_date">
       </div>
       <div>
-        <label class="text-xs text-slate-500 block mb-1">To</label>
-        <input type="date" class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5" value="${e.end_date || ''}" data-field="end_date">
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">To</label>
+        <input type="date" class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" value="${e.end_date || ''}" data-field="end_date">
       </div>
       <div>
-        <label class="text-xs text-slate-500 block mb-1">Start hour</label>
-        <select class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5" data-field="start_hour">
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Start hour</label>
+        <select class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" data-field="start_hour">
           ${hours.slice(0,24).map(h => opt(h, e.start_hour)).join('')}
         </select>
       </div>
       <div>
-        <label class="text-xs text-slate-500 block mb-1">End hour</label>
-        <select class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5" data-field="end_hour">
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">End hour</label>
+        <select class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" data-field="end_hour">
           ${hours.slice(1).map(h => opt(h, e.end_hour)).join('')}
         </select>
       </div>
       <div>
-        <label class="text-xs text-slate-500 block mb-1">Budget</label>
-        <input type="number" step="1" class="w-full rounded-lg border border-slate-300 text-sm px-2 py-1.5" value="${e.budget ?? ''}" data-field="budget">
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Budget</label>
+        <input type="number" step="1" class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" value="${e.budget ?? ''}" data-field="budget">
       </div>
     </div>
     <div class="flex items-center justify-between">
-      <span class="badge bg-slate-100 text-slate-600">${e.status || 'PENDING'}</span>
+      <span class="badge" style="background:var(--plane);color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>${e.status || 'PENDING'}</span>
       <div class="flex gap-2">
-        <button class="text-xs font-semibold text-brand-600 hover:text-brand-700" onclick="saveWindow('${e.entry_id}')">Save</button>
-        <button class="text-xs font-semibold text-red-600 hover:text-red-700" onclick="removeWindow('${e.entry_id}')">Remove</button>
+        <button class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)" onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'" onclick="saveWindow('${e.entry_id}')">Save</button>
+        <button class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--critical)" onmouseover="this.style.background='#fbeaea'" onmouseout="this.style.background='transparent'" onclick="removeWindow('${e.entry_id}')">Remove</button>
       </div>
     </div>
   </div>`;
@@ -126,7 +155,7 @@ async function refreshEntries() {
   const el = document.getElementById('scheduleEntries');
   el.innerHTML = data.entries.length
     ? data.entries.map(entryTemplate).join('')
-    : '<div class="text-sm text-slate-400 text-center py-4">No windows yet.</div>';
+    : `<div class="text-sm text-center py-6" style="color:var(--ink-muted)">No windows yet.</div>`;
 }
 
 function readEntry(container) {

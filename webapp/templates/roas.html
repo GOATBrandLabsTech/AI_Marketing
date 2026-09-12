@@ -1,123 +1,278 @@
 {% extends "base.html" %}
 {% block title %}ROAS Impact - Blinkit Control{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-6">
+<div class="flex items-center justify-between mb-7">
   <div>
-    <h1 class="text-2xl font-bold text-ink">ROAS Impact</h1>
-    <p class="text-sm text-slate-500">Did the agent's recommendation actually help? 7 days before vs. 7 days after each action.</p>
+    <h1 class="page-title text-2xl font-bold text-ink">ROAS Impact</h1>
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Did the agent's recommendation actually help? 7 days before vs. 7 days after each action.</p>
   </div>
 </div>
 
-<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-  <div class="card p-4">
-    <div class="text-xs text-slate-500 mb-1">Recommendations</div>
-    <div class="text-2xl font-bold text-ink">{{ kpi.total }}</div>
-    <div class="text-xs text-slate-400">since {{ since_date }}</div>
-  </div>
-  <div class="card p-4">
-    <div class="text-xs text-slate-500 mb-1">Improved</div>
-    <div class="text-2xl font-bold text-emerald-600">{{ kpi.improved }}</div>
-    <div class="text-xs text-slate-400">of {{ kpi.scoreable }} scoreable</div>
-  </div>
-  <div class="card p-4">
-    <div class="text-xs text-slate-500 mb-1">Worsened</div>
-    <div class="text-2xl font-bold text-red-600">{{ kpi.worsened }}</div>
-    <div class="text-xs text-slate-400">of {{ kpi.scoreable }} scoreable</div>
-  </div>
-  <div class="card p-4">
-    <div class="text-xs text-slate-500 mb-1">Flat</div>
-    <div class="text-2xl font-bold text-slate-500">{{ kpi.flat }}</div>
-    <div class="text-xs text-slate-400">of {{ kpi.scoreable }} scoreable</div>
-  </div>
-  <div class="card p-4">
-    <div class="text-xs text-slate-500 mb-1">Avg ROAS change</div>
-    <div class="text-2xl font-bold {{ 'text-emerald-600' if kpi.avg_roas_change and kpi.avg_roas_change > 0 else 'text-red-600' if kpi.avg_roas_change and kpi.avg_roas_change < 0 else 'text-slate-500' }}">
-      {{ '%+.2f'|format(kpi.avg_roas_change) if kpi.avg_roas_change is not none else '-' }}
+{% if showcase %}
+<div class="rounded-2xl p-6 mb-6 relative overflow-hidden" style="background:linear-gradient(135deg,#101a2b,#152847 55%,#1c3660); box-shadow:0 8px 24px rgba(16,26,43,.25);">
+  <div class="flex flex-wrap items-start justify-between gap-4 mb-5">
+    <div>
+      <div class="inline-flex items-center gap-1.5 badge mb-2" style="background:rgba(255,255,255,.12);color:#bcd4f7;">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:#3987e5"></span> AI SHOWCASE
+      </div>
+      <h2 class="font-display text-xl font-bold text-white">AI bid agent &mdash; live experiment</h2>
+      <p class="text-sm mt-1 max-w-2xl" style="color:#9fb3d1">
+        A deliberately single-variable test: the pacing schedule was paused so any ROAS movement can only be attributed to the AI bid agent.
+        Live since <span class="font-semibold text-white">{{ showcase.go_live }}</span> across
+        <span class="font-semibold text-white">{{ showcase.campaign_count }} campaigns</span>.
+      </p>
     </div>
-    <div class="text-xs text-slate-400">scoreable rows only</div>
+    <div class="flex gap-6 text-right">
+      <div>
+        <div class="text-[11px] uppercase tracking-wide" style="color:#7d93b5">Baseline ROAS (7d pre)</div>
+        <div class="font-display text-2xl font-bold text-white">{{ showcase.baseline_7d if showcase.baseline_7d is not none else '-' }}</div>
+      </div>
+      <div>
+        <div class="text-[11px] uppercase tracking-wide" style="color:#7d93b5">Live ROAS since go-live</div>
+        <div class="font-display text-2xl font-bold" style="color: {{ '#3ddc6a' if showcase.live_roas and showcase.baseline_7d and showcase.live_roas > showcase.baseline_7d else '#ff8a80' if showcase.live_roas and showcase.baseline_7d and showcase.live_roas < showcase.baseline_7d else '#fff' }}">
+          {{ showcase.live_roas if showcase.live_roas is not none else '-' }}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
+    <div style="height:200px"><canvas id="showcaseChart"></canvas></div>
+  </div>
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="badge" style="background:rgba(255,255,255,.08);color:#c7d5ea;">{{ showcase.excluded_count }} Teacher's Day campaigns intentionally excluded</span>
+    <span class="badge" style="background:rgba(255,255,255,.08);color:#c7d5ea;">Pacing schedule paused for a clean read</span>
+    <span class="badge" style="background:rgba(255,255,255,.08);color:#c7d5ea;">{{ showcase.live_days }} days live &middot; &#8377;{{ '{:,.0f}'.format(showcase.live_spend) }} spend tracked</span>
   </div>
 </div>
+{% endif %}
+
+{% if brand_summary %}
+<div class="card p-5 mb-6">
+  <div class="text-sm font-semibold text-ink mb-3">Performance by brand</div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide" style="color:var(--ink-muted)">Brand</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Recs</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Improved</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Worsened</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Flat</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Avg &Delta; ROAS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in brand_summary %}
+        <tr class="border-b" style="border-color:var(--grid)">
+          <td class="px-3 py-2 font-semibold">
+            <a href="{{ url_for('roas', brand=b.brand) }}" style="color:var(--brand)">{{ b.brand }}</a>
+          </td>
+          <td class="px-3 py-2 text-right">{{ b.total }}</td>
+          <td class="px-3 py-2 text-right font-semibold" style="color:var(--good)">{{ b.improved }}</td>
+          <td class="px-3 py-2 text-right font-semibold" style="color:var(--critical)">{{ b.worsened }}</td>
+          <td class="px-3 py-2 text-right" style="color:var(--ink-2)">{{ b.flat }}</td>
+          <td class="px-3 py-2 text-right font-semibold" style="color: {{ 'var(--good)' if b.avg_roas_change and b.avg_roas_change > 0 else 'var(--critical)' if b.avg_roas_change and b.avg_roas_change < 0 else 'var(--ink-muted)' }}">
+            {{ '%+.2f'|format(b.avg_roas_change) if b.avg_roas_change is not none else '-' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+  <div class="card p-5">
+    <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Recommendations</div>
+    <div class="font-display text-3xl font-extrabold text-ink">{{ kpi.total }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">since {{ since_date }}</div>
+  </div>
+  <div class="card p-5">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
+      <span class="w-2 h-2 rounded-full" style="background:var(--good)"></span> Improved
+    </div>
+    <div class="font-display text-3xl font-extrabold" style="color:var(--good)">{{ kpi.improved }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable</div>
+  </div>
+  <div class="card p-5">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
+      <span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span> Worsened
+    </div>
+    <div class="font-display text-3xl font-extrabold" style="color:var(--critical)">{{ kpi.worsened }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable</div>
+  </div>
+  <div class="card p-5">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
+      <span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span> Flat
+    </div>
+    <div class="font-display text-3xl font-extrabold" style="color:var(--ink-2)">{{ kpi.flat }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable</div>
+  </div>
+  <div class="card p-5">
+    <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Avg ROAS change</div>
+    <div class="font-display text-3xl font-extrabold" style="color: {{ 'var(--good)' if kpi.avg_roas_change and kpi.avg_roas_change > 0 else 'var(--critical)' if kpi.avg_roas_change and kpi.avg_roas_change < 0 else 'var(--ink-2)' }}">
+      {{ '%+.2f'|format(kpi.avg_roas_change) if kpi.avg_roas_change is not none else '-' }}
+    </div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">scoreable rows only</div>
+  </div>
+</div>
+
+{% if daily_series %}
+<div class="card p-5 mb-6">
+  <div class="flex items-center justify-between mb-3">
+    <div class="text-sm font-semibold text-ink">Verdicts over time</div>
+    <div class="flex items-center gap-4 text-xs" style="color:var(--ink-2)">
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--good)"></span>Improved</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--critical)"></span>Worsened</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:#c3c2b7"></span>Flat</span>
+    </div>
+  </div>
+  <div style="height:220px"><canvas id="verdictChart"></canvas></div>
+</div>
+{% endif %}
 
 <form method="get" class="card p-4 mb-6 flex flex-wrap items-end gap-4">
   <input type="hidden" name="brand" value="{{ brand }}">
   <div>
-    <label class="text-xs font-medium text-slate-600 block mb-1">Lookback window</label>
-    <select name="since_days" onchange="this.form.submit()" class="rounded-lg border border-slate-300 text-sm px-3 py-1.5">
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Lookback window</label>
+    <select name="since_days" onchange="this.form.submit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
       {% for d in [7,14,30,60,90] %}
       <option value="{{ d }}" {{ 'selected' if d == since_days else '' }}>Last {{ d }} days</option>
       {% endfor %}
     </select>
   </div>
   <div>
-    <label class="text-xs font-medium text-slate-600 block mb-1">Verdict</label>
-    <select name="verdict" onchange="this.form.submit()" class="rounded-lg border border-slate-300 text-sm px-3 py-1.5">
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Verdict</label>
+    <select name="verdict" onchange="this.form.submit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
       <option value="">All</option>
       {% for v in ['IMPROVED','WORSENED','FLAT'] %}
       <option value="{{ v }}" {{ 'selected' if v == verdict else '' }}>{{ v.title() }}</option>
       {% endfor %}
     </select>
   </div>
-  <div class="flex-1 min-w-[200px]">
-    <label class="text-xs font-medium text-slate-600 block mb-1">Search campaign / keyword</label>
+  <div class="flex-1 min-w-[220px]">
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Search campaign / keyword</label>
     <input type="text" name="search" value="{{ search or '' }}" placeholder="e.g. ear rings"
-           class="w-full rounded-lg border border-slate-300 text-sm px-3 py-1.5">
+           class="w-full rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
   </div>
-  <button class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-lg px-4 py-1.5">Apply</button>
+  <button class="text-white text-sm font-semibold rounded-lg px-5 py-2 transition" style="background:var(--brand);"
+          onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">Apply</button>
 </form>
 
 <div class="card overflow-hidden">
   <div class="overflow-x-auto max-h-[65vh]">
     <table class="data w-full text-sm">
       <thead>
-        <tr class="text-left text-slate-500 border-b border-slate-200">
-          <th class="px-3 py-2">Date</th>
-          <th class="px-3 py-2">Campaign</th>
-          <th class="px-3 py-2">Keyword</th>
-          <th class="px-3 py-2">Action</th>
-          <th class="px-3 py-2 text-right">CPM</th>
-          <th class="px-3 py-2 text-right">ROAS before</th>
-          <th class="px-3 py-2 text-right">ROAS after</th>
-          <th class="px-3 py-2 text-right">Δ ROAS</th>
-          <th class="px-3 py-2 text-right">Δ Spend</th>
-          <th class="px-3 py-2">Pushed?</th>
-          <th class="px-3 py-2">Verdict</th>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-4 py-3">Date</th>
+          {% if brand == ALL_BRANDS %}<th class="px-4 py-3">Brand</th>{% endif %}
+          <th class="px-4 py-3">Campaign</th>
+          <th class="px-4 py-3">Keyword</th>
+          <th class="px-4 py-3">Action</th>
+          <th class="px-4 py-3 text-right">CPM</th>
+          <th class="px-4 py-3 text-right">ROAS before</th>
+          <th class="px-4 py-3 text-right">ROAS after</th>
+          <th class="px-4 py-3 text-right">&Delta; ROAS</th>
+          <th class="px-4 py-3 text-right">&Delta; Spend</th>
+          <th class="px-4 py-3">Pushed?</th>
+          <th class="px-4 py-3">Verdict</th>
         </tr>
       </thead>
       <tbody>
         {% for r in rows %}
-        <tr class="border-b border-slate-100 hover:bg-slate-50" title="{{ r.explanation or '' }}">
-          <td class="px-3 py-2 whitespace-nowrap text-slate-500">{{ r.action_date }}</td>
-          <td class="px-3 py-2">{{ r.campaign_name }}</td>
-          <td class="px-3 py-2">
+        <tr class="border-b" style="border-color:var(--grid)" title="{{ r.explanation or '' }}">
+          <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.action_date }}</td>
+          {% if brand == ALL_BRANDS %}<td class="px-4 py-2.5" style="color:var(--ink-2)">{{ r.Brand }}</td>{% endif %}
+          <td class="px-4 py-2.5 font-medium">{{ r.campaign_name }}</td>
+          <td class="px-4 py-2.5">
             {{ r.targeting }}
-            {% if r.diverged %}<span class="badge bg-amber-100 text-amber-700 ml-1">diverged</span>{% endif %}
+            {% if r.diverged %}<span class="badge ml-1" style="background:#fef3e2;color:#8a5a00;"><span class="dot" style="background:var(--warning)"></span>diverged</span>{% endif %}
           </td>
-          <td class="px-3 py-2 whitespace-nowrap">{{ r.action }}</td>
-          <td class="px-3 py-2 text-right whitespace-nowrap">
-            {{ r.current_cpm }}{% if r.cpm_intended %} → {{ r.cpm_intended }}{% endif %}
+          <td class="px-4 py-2.5 whitespace-nowrap">{{ r.action }}</td>
+          <td class="px-4 py-2.5 text-right whitespace-nowrap font-medium">
+            {{ r.current_cpm }}{% if r.cpm_intended %} <span style="color:var(--ink-muted)">&rarr;</span> {{ r.cpm_intended }}{% endif %}
           </td>
-          <td class="px-3 py-2 text-right">{{ r.roas_before if r.roas_before is not none else '-' }}</td>
-          <td class="px-3 py-2 text-right">{{ r.roas_after if r.roas_after is not none else '-' }}</td>
-          <td class="px-3 py-2 text-right font-semibold {{ 'text-emerald-600' if r.roas_change and r.roas_change > 0 else 'text-red-600' if r.roas_change and r.roas_change < 0 else 'text-slate-400' }}">
+          <td class="px-4 py-2.5 text-right">{{ r.roas_before if r.roas_before is not none else '-' }}</td>
+          <td class="px-4 py-2.5 text-right">{{ r.roas_after if r.roas_after is not none else '-' }}</td>
+          <td class="px-4 py-2.5 text-right font-bold" style="color: {{ 'var(--good)' if r.roas_change and r.roas_change > 0 else 'var(--critical)' if r.roas_change and r.roas_change < 0 else 'var(--ink-muted)' }}">
             {{ r.roas_change if r.roas_change is not none else '-' }}
           </td>
-          <td class="px-3 py-2 text-right">{{ r.spend_change if r.spend_change is not none else '-' }}</td>
-          <td class="px-3 py-2">
-            {% if r.was_implemented %}<span class="badge bg-brand-100 text-brand-700">pushed</span>
-            {% else %}<span class="badge bg-slate-100 text-slate-500">proposed</span>{% endif %}
+          <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.spend_change if r.spend_change is not none else '-' }}</td>
+          <td class="px-4 py-2.5">
+            {% if r.was_implemented %}<span class="badge" style="background:var(--brand-50);color:var(--brand-dark);"><span class="dot" style="background:var(--brand)"></span>pushed</span>
+            {% else %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>proposed</span>{% endif %}
           </td>
-          <td class="px-3 py-2">
-            {% if r.verdict == 'IMPROVED' %}<span class="badge bg-emerald-100 text-emerald-700">Improved</span>
-            {% elif r.verdict == 'WORSENED' %}<span class="badge bg-red-100 text-red-700">Worsened</span>
-            {% elif r.verdict == 'FLAT' %}<span class="badge bg-slate-200 text-slate-600">Flat</span>
-            {% else %}<span class="text-slate-300">-</span>{% endif %}
+          <td class="px-4 py-2.5">
+            {% if r.verdict == 'IMPROVED' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>Improved</span>
+            {% elif r.verdict == 'WORSENED' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>Worsened</span>
+            {% elif r.verdict == 'FLAT' %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>Flat</span>
+            {% else %}<span style="color:#d5d4cf">-</span>{% endif %}
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="11" class="px-3 py-8 text-center text-slate-400">No rows for this filter.</td></tr>
+        <tr><td colspan="{{ 12 if brand == ALL_BRANDS else 11 }}" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No rows for this filter.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+{% if daily_series or showcase %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% endif %}
+{% if showcase %}
+<script>
+const showcaseDaily = {{ showcase.daily|tojson }};
+new Chart(document.getElementById('showcaseChart'), {
+  type: 'line',
+  data: {
+    labels: showcaseDaily.map(d => d.date),
+    datasets: [{
+      label: 'Portfolio ROAS',
+      data: showcaseDaily.map(d => d.roas),
+      borderColor: '#3987e5', backgroundColor: 'rgba(57,135,229,.15)',
+      borderWidth: 2, pointRadius: 0, tension: .25, fill: true, spanGaps: true,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: { padding: 10, cornerRadius: 8 },
+      annotation: undefined,
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#9fb3d1', font: { size: 10 } } },
+      y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,.08)' }, ticks: { color: '#9fb3d1', font: { size: 10 } } },
+    }
+  }
+});
+</script>
+{% endif %}
+{% if daily_series %}
+<script>
+const daily = {{ daily_series|tojson }};
+new Chart(document.getElementById('verdictChart'), {
+  type: 'bar',
+  data: {
+    labels: daily.map(d => d.date),
+    datasets: [
+      { label: 'Improved', data: daily.map(d => d.improved), backgroundColor: '#0ca30c', borderRadius: 3, maxBarThickness: 22 },
+      { label: 'Worsened', data: daily.map(d => d.worsened), backgroundColor: '#d03b3b', borderRadius: 3, maxBarThickness: 22 },
+      { label: 'Flat', data: daily.map(d => d.flat), backgroundColor: '#c3c2b7', borderRadius: 3, maxBarThickness: 22 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: { padding: 10, cornerRadius: 8 } },
+    scales: {
+      x: { stacked: true, grid: { display: false }, ticks: { color: '#898781', font: { size: 11 } } },
+      y: { stacked: true, beginAtZero: true, grid: { color: '#e8e7e2' }, ticks: { color: '#898781', font: { size: 11 }, precision: 0 } },
+    }
+  }
+});
+</script>
+{% endif %}
 {% endblock %}
