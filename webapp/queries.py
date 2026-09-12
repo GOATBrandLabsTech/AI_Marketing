@@ -180,8 +180,8 @@ def fetch_brands():
     return rows or ["Voylla", "Chumbak", "Petcrux"]
 
 
-def fetch_roas_impact(brand, since_days=30, verdict=None, search=None):
-    since = date.today().fromordinal(date.today().toordinal() - since_days)
+def fetch_roas_impact(brand, since_date, verdict=None, search=None):
+    since = since_date
     with get_cursor() as cur:
         cur.execute(ROAS_IMPACT_SQL, {"brand": brand, "since": since})
         rows = cur.fetchall()
@@ -430,14 +430,39 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
 
     rows_out = []
     for key, b in agg.items():
-        if not b["days_after"]:
-            continue  # keyword didn't run at all in the AFTER window - not comparable
         days_before = b["days_before"] or 1
         spend_before_avg = b["spend_before"] / days_before
         sales_before_avg = b["sales_before"] / days_before
+        roas_before = round(sales_before_avg / spend_before_avg, 2) if spend_before_avg else None
+
+        a = actions_idx.get(key)
+        action_label = (a["override_action"] or a["action"]) if a else "NOT TARGETED"
+
+        if not b["days_after"]:
+            # No Blinkit_Ads_Report rows at all after the cutover - usually
+            # because the keyword/campaign stopped serving, most often from
+            # an explicit PAUSE. This used to be silently dropped, which
+            # hid the AI's most decisive interventions (a successful pause
+            # looks identical to "no data" otherwise) from the analysis.
+            if spend_before_avg <= 0:
+                continue  # never ran in either window - genuinely not relevant
+            rows_out.append({
+                "campaign_id": b["campaign_id"],
+                "campaign_name": b["campaign_name"],
+                "targeting": b["targeting"],
+                "action": action_label,
+                "spend_before": round(spend_before_avg, 2),
+                "spend_after": 0.0,
+                "roas_before": roas_before,
+                "roas_after": None,
+                "roas_delta": None,
+                "verdict": "PAUSED" if "PAUSE" in (action_label or "") else "STOPPED",
+                "meaningful": spend_before_avg >= min_spend,
+            })
+            continue
+
         spend_after_avg = b["spend_after"] / b["days_after"]
         sales_after_avg = b["sales_after"] / b["days_after"]
-        roas_before = round(sales_before_avg / spend_before_avg, 2) if spend_before_avg else None
         roas_after = round(sales_after_avg / spend_after_avg, 2) if spend_after_avg else 0.0
 
         if roas_before is None:
@@ -448,12 +473,6 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
             verdict = "WORSE"
         else:
             verdict = "SAME"
-
-        a = actions_idx.get(key)
-        if a:
-            action_label = a["override_action"] or a["action"]
-        else:
-            action_label = "NOT TARGETED"
 
         rows_out.append({
             "campaign_id": b["campaign_id"],
@@ -469,24 +488,30 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
             "meaningful": spend_after_avg >= min_spend or spend_before_avg >= min_spend,
         })
 
-    rows_out.sort(key=lambda r: r["spend_after"], reverse=True)
+    rows_out.sort(key=lambda r: max(r["spend_after"], r["spend_before"]), reverse=True)
 
     total_spend_after = sum(r["spend_after"] for r in rows_out) or 1
-    naive = {"BETTER": 0, "WORSE": 0, "SAME": 0, "NEW": 0}
-    weighted_spend = {"BETTER": 0.0, "WORSE": 0.0, "SAME": 0.0, "NEW": 0.0}
-    meaningful_naive = {"BETTER": 0, "WORSE": 0, "SAME": 0, "NEW": 0}
+    verdict_keys = ["BETTER", "WORSE", "SAME", "NEW", "PAUSED", "STOPPED"]
+    naive = {k: 0 for k in verdict_keys}
+    weighted_spend = {k: 0.0 for k in verdict_keys}
+    meaningful_naive = {k: 0 for k in verdict_keys}
+    spend_saved = 0.0
     for r in rows_out:
         naive[r["verdict"]] += 1
         weighted_spend[r["verdict"]] += r["spend_after"]
         if r["meaningful"]:
             meaningful_naive[r["verdict"]] += 1
+        if r["verdict"] == "PAUSED":
+            spend_saved += r["spend_before"]
 
     portfolio_spend_before = sum(r["spend_before"] for r in rows_out)
     portfolio_sales_before = sum(
         r["spend_before"] * r["roas_before"] for r in rows_out if r["roas_before"] is not None
     )
     portfolio_spend_after = total_spend_after
-    portfolio_sales_after = sum(r["spend_after"] * r["roas_after"] for r in rows_out)
+    portfolio_sales_after = sum(
+        r["spend_after"] * r["roas_after"] for r in rows_out if r["roas_after"] is not None
+    )
 
     summary = {
         "cutover": cutover_date,
@@ -502,6 +527,7 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
         "portfolio_roas_after": round(portfolio_sales_after / portfolio_spend_after, 2) if portfolio_spend_after else None,
         "portfolio_spend_before": round(portfolio_spend_before, 2),
         "portfolio_spend_after": round(portfolio_spend_after, 2),
+        "spend_saved": round(spend_saved, 2),
     }
     return rows_out, summary
 

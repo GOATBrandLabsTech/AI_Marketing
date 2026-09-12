@@ -69,7 +69,7 @@
           onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">Run</button>
 </form>
 
-<div class="grid md:grid-cols-2 gap-4 mb-6">
+<div class="grid md:grid-cols-3 gap-4 mb-6">
   <div class="card p-5">
     <div class="text-sm font-semibold text-ink mb-3">By keyword count <span class="font-normal" style="color:var(--ink-muted)">(misleading if spend is skewed)</span></div>
     <div class="grid grid-cols-3 gap-3 text-center">
@@ -111,20 +111,36 @@
       &middot; spend &#8377;{{ '{:,.0f}'.format(summary.portfolio_spend_before) }}/day &rarr; &#8377;{{ '{:,.0f}'.format(summary.portfolio_spend_after) }}/day
     </div>
   </div>
+  <div class="card p-5">
+    <div class="text-sm font-semibold text-ink mb-3">Paused / stopped keywords</div>
+    <div class="grid grid-cols-2 gap-3 text-center">
+      <div>
+        <div class="font-display text-2xl font-bold" style="color:var(--brand)">{{ summary.naive_counts.PAUSED }}</div>
+        <div class="text-xs" style="color:var(--ink-muted)">Paused by AI</div>
+      </div>
+      <div>
+        <div class="font-display text-2xl font-bold" style="color:var(--ink-2)">{{ summary.naive_counts.STOPPED }}</div>
+        <div class="text-xs" style="color:var(--ink-muted)">Stopped otherwise</div>
+      </div>
+    </div>
+    <div class="text-xs mt-3 pt-3 border-t" style="border-color:var(--grid); color:var(--ink-muted)">
+      &#8377;{{ '{:,.0f}'.format(summary.spend_saved) }}/day of spend stopped by PAUSE actions &mdash; these went to zero on purpose, so they're excluded from the Better/Worse verdict above rather than counted as "Worse."
+    </div>
+  </div>
 </div>
 
 <div class="card overflow-hidden">
   <div class="overflow-x-auto max-h-[65vh]">
-    <table class="data w-full text-sm">
+    <table class="data w-full text-sm" id="impactTable">
       <thead>
         <tr class="text-left border-b" style="border-color:var(--grid)">
-          <th class="px-4 py-3">Campaign</th>
-          <th class="px-4 py-3">Keyword</th>
-          <th class="px-4 py-3">Action</th>
-          <th class="px-4 py-3 text-right">Spend before &rarr; after</th>
-          <th class="px-4 py-3 text-right">ROAS before &rarr; after</th>
-          <th class="px-4 py-3 text-right">&Delta;</th>
-          <th class="px-4 py-3">Verdict</th>
+          <th class="px-4 py-3" data-sortable>Campaign</th>
+          <th class="px-4 py-3" data-sortable>Keyword</th>
+          <th class="px-4 py-3" data-sortable>Action</th>
+          <th class="px-4 py-3 text-right" data-sortable>Spend before &rarr; after</th>
+          <th class="px-4 py-3 text-right" data-sortable>ROAS before &rarr; after</th>
+          <th class="px-4 py-3 text-right" data-sortable>&Delta;</th>
+          <th class="px-4 py-3" data-sortable>Verdict</th>
         </tr>
       </thead>
       <tbody>
@@ -133,14 +149,22 @@
           <td class="px-4 py-2.5">{{ r.campaign_name }}</td>
           <td class="px-4 py-2.5 font-medium">{{ r.targeting }}</td>
           <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.action }}</td>
-          <td class="px-4 py-2.5 text-right whitespace-nowrap tabular">&#8377;{{ r.spend_before }} &rarr; &#8377;{{ r.spend_after }}</td>
-          <td class="px-4 py-2.5 text-right whitespace-nowrap tabular">{{ r.roas_before if r.roas_before is not none else '-' }} &rarr; {{ r.roas_after }}</td>
+          <td class="px-4 py-2.5 text-right whitespace-nowrap tabular" data-sort="{{ r.spend_after }}">
+            &#8377;{{ r.spend_before }} &rarr;
+            {% if r.roas_after is not none %}&#8377;{{ r.spend_after }}{% else %}<span style="color:var(--ink-muted)">stopped</span>{% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right whitespace-nowrap tabular" data-sort="{{ r.roas_after if r.roas_after is not none else -1 }}">
+            {{ r.roas_before if r.roas_before is not none else '-' }} &rarr;
+            {% if r.roas_after is not none %}{{ r.roas_after }}{% else %}<span style="color:var(--ink-muted)">-</span>{% endif %}
+          </td>
           <td class="px-4 py-2.5 text-right font-bold tabular" style="color: {{ 'var(--good)' if r.roas_delta and r.roas_delta > 0 else 'var(--critical)' if r.roas_delta and r.roas_delta < 0 else 'var(--ink-muted)' }}">
             {{ '%+.2f'|format(r.roas_delta) if r.roas_delta is not none else '-' }}
           </td>
-          <td class="px-4 py-2.5">
+          <td class="px-4 py-2.5" data-sort="{{ r.verdict }}">
             {% if r.verdict == 'BETTER' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>Better</span>
             {% elif r.verdict == 'WORSE' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>Worse</span>
+            {% elif r.verdict == 'PAUSED' %}<span class="badge" style="background:var(--brand-50);color:var(--brand-dark);"><span class="dot" style="background:var(--brand)"></span>Paused by AI</span>
+            {% elif r.verdict == 'STOPPED' %}<span class="badge" style="background:#f2f2f0;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>Stopped</span>
             {% elif r.verdict == 'NEW' %}<span class="badge" style="background:var(--brand-50);color:var(--brand-dark);"><span class="dot" style="background:var(--brand)"></span>New</span>
             {% else %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>Same</span>{% endif %}
             {% if not r.meaningful %}<span class="text-[10px] ml-1" style="color:var(--ink-muted)">noise</span>{% endif %}
@@ -154,4 +178,7 @@
   </div>
 </div>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>initSortableTable('impactTable');</script>
 {% endblock %}

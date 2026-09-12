@@ -43,13 +43,13 @@
     <table class="data w-full text-sm" id="campaignsTable">
       <thead>
         <tr class="text-left border-b" style="border-color:var(--grid)">
-          {% if brand == ALL_BRANDS %}<th class="px-4 py-3">Brand</th>{% endif %}
-          <th class="px-4 py-3">Campaign</th>
-          <th class="px-4 py-3 text-right">Budget</th>
-          <th class="px-4 py-3">Status</th>
-          <th class="px-4 py-3 text-right">Windows</th>
-          <th class="px-4 py-3">Next start</th>
-          <th class="px-4 py-3">Last end</th>
+          {% if brand == ALL_BRANDS %}<th class="px-4 py-3" data-sortable>Brand</th>{% endif %}
+          <th class="px-4 py-3" data-sortable>Campaign</th>
+          <th class="px-4 py-3 text-right" data-sortable>Budget</th>
+          <th class="px-4 py-3" data-sortable>Status</th>
+          <th class="px-4 py-3 text-right" data-sortable>Windows</th>
+          <th class="px-4 py-3" data-sortable>Next start</th>
+          <th class="px-4 py-3" data-sortable>Last end</th>
           <th class="px-4 py-3"></th>
         </tr>
       </thead>
@@ -62,7 +62,7 @@
             <div class="text-xs" style="color:var(--ink-muted)">#{{ r.campaign_id }}</div>
           </td>
           <td class="px-4 py-2.5 text-right font-medium">{{ r.budget if r.budget is not none else '-' }}</td>
-          <td class="px-4 py-2.5">
+          <td class="px-4 py-2.5" data-sort="{{ r.last_status or '' }}">
             {% if r.last_status == 'BUDGET_EXHAUSTED' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>{{ r.last_status }}</span>
             {% elif r.last_status in ['ON_HOLD','STOPPED'] %}<span class="badge" style="background:#fef3e2;color:#8a5a00;"><span class="dot" style="background:var(--warning)"></span>{{ r.last_status }}</span>
             {% elif r.last_status == 'ACTIVE' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>{{ r.last_status }}</span>
@@ -103,6 +103,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script>initSortableTable('campaignsTable');</script>
 <script>
 function filterCampaigns() {
   const q = document.getElementById('campaignSearch').value.trim().toLowerCase();

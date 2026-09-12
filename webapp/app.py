@@ -115,7 +115,23 @@ def roas():
     verdict = request.args.get("verdict") or None
     search = request.args.get("search") or None
 
-    all_rows = queries.fetch_roas_impact(brand, since_days=since_days, search=search)
+    # The cutover date picked in the Channel ROAS panel anchors the whole
+    # page's time window - "since_days" means "N days before the cutover",
+    # not "N days before today", so picking an older action date actually
+    # changes what the recommendation tiles below show instead of always
+    # sitting on a fixed trailing-30-days-from-today window.
+    channel = None
+    action_dates = []
+    cutover_date = None
+    if brand != queries.ALL_BRANDS:
+        action_dates = queries.fetch_action_dates(brand)
+        default_cutover = date.fromisoformat(action_dates[0]) if action_dates else (date.today() - timedelta(days=1))
+        cutover_arg = request.args.get("cutover")
+        cutover_date = date.fromisoformat(cutover_arg) if cutover_arg else default_cutover
+
+    since_date = (cutover_date or date.today()) - timedelta(days=since_days)
+
+    all_rows = queries.fetch_roas_impact(brand, since_date, search=search)
     scoreable = [r for r in all_rows if r["verdict"]]
     changes = [float(r["roas_change"]) for r in scoreable if r["roas_change"] is not None]
     kpi = {
@@ -135,30 +151,23 @@ def roas():
     daily_series = [daily[d] for d in sorted(daily.keys())]
 
     rows = [r for r in all_rows if not verdict or r["verdict"] == verdict]
-    since_date = date.today().fromordinal(date.today().toordinal() - since_days)
 
     brand_summary = queries.fetch_brand_summary(all_rows) if brand == queries.ALL_BRANDS else None
 
-    channel = None
-    action_dates = []
     if brand != queries.ALL_BRANDS:
-        action_dates = queries.fetch_action_dates(brand)
-        default_cutover = date.fromisoformat(action_dates[0]) if action_dates else (date.today() - timedelta(days=1))
-        cutover_arg = request.args.get("cutover")
-        cutover_date = date.fromisoformat(cutover_arg) if cutover_arg else default_cutover
         window_days = int(request.args.get("window_days", 7))
         granularity = request.args.get("granularity", "day")
         campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" else None
 
-        daily = queries.fetch_channel_daily(brand, days=365, campaign_ids=campaign_ids)
+        daily_channel = queries.fetch_channel_daily(brand, days=365, campaign_ids=campaign_ids)
         if granularity == "day":
             # a year of individual days is illegible as a line chart - zoom
             # the day view around the cutover; week/month keep the full year
             # since bucketing already compresses it.
             chart_start = cutover_date - timedelta(days=max(30, window_days * 3))
-            daily_for_chart = [d for d in daily if chart_start <= d["date"]]
+            daily_for_chart = [d for d in daily_channel if chart_start <= d["date"]]
         else:
-            daily_for_chart = daily
+            daily_for_chart = daily_channel
 
         if granularity == "week":
             iso = cutover_date.isocalendar()
@@ -170,7 +179,7 @@ def roas():
 
         channel = {
             "trend": queries.bucket_channel_series(daily_for_chart, granularity),
-            "before_after": queries.channel_before_after(daily, cutover_date, window_days),
+            "before_after": queries.channel_before_after(daily_channel, cutover_date, window_days),
             "cutover_date": cutover_date,
             "cutover_label": cutover_label,
             "window_days": window_days,
@@ -201,7 +210,10 @@ def roas_csv():
     since_days = int(request.args.get("since_days", 30))
     verdict = request.args.get("verdict") or None
     search = request.args.get("search") or None
-    rows = queries.fetch_roas_impact(brand, since_days=since_days, verdict=verdict, search=search)
+    cutover_arg = request.args.get("cutover")
+    anchor = date.fromisoformat(cutover_arg) if cutover_arg else date.today()
+    since_date = anchor - timedelta(days=since_days)
+    rows = queries.fetch_roas_impact(brand, since_date, verdict=verdict, search=search)
     columns = [
         "action_date", "Brand", "campaign_name", "targeting", "action", "current_cpm",
         "cpm_intended", "roas_before", "roas_after", "roas_change", "spend_change",
