@@ -6,6 +6,11 @@
     <h1 class="page-title text-2xl font-bold text-ink">Campaigns &amp; Budget</h1>
     <p class="text-sm mt-0.5" style="color:var(--ink-2)">Live campaign status plus the run-time windows that pace each campaign's budget.</p>
   </div>
+  <a href="{{ url_for('campaigns_csv', brand=brand) }}"
+     class="text-xs font-semibold rounded-lg px-3.5 py-2 transition border" style="border-color:var(--ring); color:var(--ink-2)"
+     onmouseover="this.style.background='var(--plane)'" onmouseout="this.style.background='transparent'">
+    Download CSV
+  </a>
 </div>
 
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
@@ -27,9 +32,15 @@
   </div>
 </div>
 
+<div class="mb-4">
+  <input type="text" id="campaignSearch" oninput="filterCampaigns()" placeholder="Search campaigns by name or ID&hellip;"
+         class="w-full max-w-md rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+  <span id="campaignSearchCount" class="text-xs ml-2" style="color:var(--ink-muted)"></span>
+</div>
+
 <div class="card overflow-hidden">
   <div class="overflow-x-auto max-h-[75vh]">
-    <table class="data w-full text-sm">
+    <table class="data w-full text-sm" id="campaignsTable">
       <thead>
         <tr class="text-left border-b" style="border-color:var(--grid)">
           {% if brand == ALL_BRANDS %}<th class="px-4 py-3">Brand</th>{% endif %}
@@ -44,7 +55,7 @@
       </thead>
       <tbody>
         {% for r in rows %}
-        <tr class="border-b" style="border-color:var(--grid)">
+        <tr class="border-b" style="border-color:var(--grid)" data-search="{{ (r.campaign_name ~ ' ' ~ r.campaign_id)|lower }}">
           {% if brand == ALL_BRANDS %}<td class="px-4 py-2.5" style="color:var(--ink-2)">{{ r.brand }}</td>{% endif %}
           <td class="px-4 py-2.5">
             <div class="font-medium">{{ r.campaign_name }}</div>
@@ -93,6 +104,19 @@
 {% endblock %}
 {% block scripts %}
 <script>
+function filterCampaigns() {
+  const q = document.getElementById('campaignSearch').value.trim().toLowerCase();
+  const rows = document.querySelectorAll('#campaignsTable tbody tr[data-search]');
+  let shown = 0;
+  rows.forEach(row => {
+    const match = !q || row.dataset.search.includes(q);
+    row.classList.toggle('hidden', !match);
+    if (match) shown++;
+  });
+  const countEl = document.getElementById('campaignSearchCount');
+  countEl.textContent = q ? `${shown} of ${rows.length} campaigns` : '';
+}
+
 let currentCampaignId = null;
 let currentBrand = null;
 

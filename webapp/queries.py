@@ -245,6 +245,184 @@ def fetch_chumbak_showcase():
     }
 
 
+def _norm_keyword(t):
+    return (t or "").strip().lower().replace("_", " ")
+
+
+def fetch_action_dates(brand, limit=30):
+    """Distinct action_date values available for a brand, most recent first -
+    powers the date picker on Pending Actions instead of only ever showing
+    the single latest date."""
+    with get_cursor() as cur:
+        cur.execute(
+            'SELECT DISTINCT action_date FROM voylla."Blinkit_actions_llm" '
+            'WHERE "Brand" = %(brand)s AND action_date ~ %(pat)s '
+            "ORDER BY action_date DESC LIMIT %(limit)s",
+            {"brand": brand, "pat": r"^\d{4}-\d{2}-\d{2}", "limit": limit},
+        )
+        return [r["action_date"] for r in cur.fetchall()]
+
+
+def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, campaign_ids=None):
+    """Per-keyword before/after comparison, portfolio-style: BEFORE is the
+    daily average over `pre_days` days ending the day before cutover_date,
+    AFTER is the daily average from cutover_date through the latest day
+    Blinkit has reported. This is intentionally independent of whether the
+    LLM actually recommended anything for a keyword - a keyword the agent
+    left untouched can still move (or not) and that's signal too.
+
+    Verdicts are reported two ways on purpose: a naive per-keyword count,
+    and a spend-weighted view (% of the AFTER period's spend). A handful of
+    near-zero-spend keywords flipping to WORSE can dominate the naive count
+    while being financially meaningless - `min_spend` (Rs/day) is the cutoff
+    used to flag those as "noise" rather than folding them into the verdict.
+    """
+    pre_start = cutover_date - timedelta(days=pre_days)
+    params = {"brand": brand, "pre_start": pre_start}
+    campaign_filter = ""
+    if campaign_ids:
+        campaign_filter = 'AND "Campaign ID" = ANY(%(campaign_ids)s)'
+        params["campaign_ids"] = campaign_ids
+
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT
+                "Campaign ID"::TEXT AS campaign_id,
+                "Targeting Value" AS targeting,
+                TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')::date AS report_date,
+                SUM("Estimated Budget Consumed") AS spend,
+                SUM("Direct Sales" + "Indirect Sales") AS sales
+            FROM voylla."Blinkit_Ads_Report"
+            WHERE "Brand" = %(brand)s
+              AND TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')::date >= %(pre_start)s
+              {campaign_filter}
+            GROUP BY 1, 2, 3
+            """,
+            params,
+        )
+        perf_rows = cur.fetchall()
+
+        cur.execute(
+            'SELECT campaign_id, targeting, action, override_action, user_implemented '
+            'FROM voylla."Blinkit_actions_llm" '
+            'WHERE "Brand" = %(brand)s AND action_date::date = %(cutover)s',
+            {"brand": brand, "cutover": cutover_date},
+        )
+        action_rows = cur.fetchall()
+
+        cur.execute(
+            'SELECT DISTINCT campaign_id::TEXT AS campaign_id, campaign_name '
+            'FROM voylla."Blinkit_Campaign_Runtime" WHERE brand = %(brand)s',
+            {"brand": brand},
+        )
+        name_map = {r["campaign_id"]: r["campaign_name"] for r in cur.fetchall()}
+
+    actions_idx = {}
+    for a in action_rows:
+        key = (str(a["campaign_id"]), _norm_keyword(a["targeting"]))
+        actions_idx[key] = a
+
+    agg = {}
+    for r in perf_rows:
+        key = (r["campaign_id"], _norm_keyword(r["targeting"]))
+        b = agg.setdefault(
+            key,
+            {
+                "campaign_id": r["campaign_id"],
+                "campaign_name": name_map.get(r["campaign_id"]) or r["campaign_id"],
+                "targeting": r["targeting"],
+                "spend_before": 0.0, "sales_before": 0.0, "days_before": 0,
+                "spend_after": 0.0, "sales_after": 0.0, "days_after": 0,
+            },
+        )
+        if pre_start <= r["report_date"] < cutover_date:
+            b["spend_before"] += float(r["spend"] or 0)
+            b["sales_before"] += float(r["sales"] or 0)
+            b["days_before"] += 1
+        elif r["report_date"] >= cutover_date:
+            b["spend_after"] += float(r["spend"] or 0)
+            b["sales_after"] += float(r["sales"] or 0)
+            b["days_after"] += 1
+
+    rows_out = []
+    for key, b in agg.items():
+        if not b["days_after"]:
+            continue  # keyword didn't run at all in the AFTER window - not comparable
+        days_before = b["days_before"] or 1
+        spend_before_avg = b["spend_before"] / days_before
+        sales_before_avg = b["sales_before"] / days_before
+        spend_after_avg = b["spend_after"] / b["days_after"]
+        sales_after_avg = b["sales_after"] / b["days_after"]
+        roas_before = round(sales_before_avg / spend_before_avg, 2) if spend_before_avg else None
+        roas_after = round(sales_after_avg / spend_after_avg, 2) if spend_after_avg else 0.0
+
+        if roas_before is None:
+            verdict = "NEW"
+        elif roas_after > roas_before + 0.05:
+            verdict = "BETTER"
+        elif roas_after < roas_before - 0.05:
+            verdict = "WORSE"
+        else:
+            verdict = "SAME"
+
+        a = actions_idx.get(key)
+        if a:
+            action_label = a["override_action"] or a["action"]
+        else:
+            action_label = "NOT TARGETED"
+
+        rows_out.append({
+            "campaign_id": b["campaign_id"],
+            "campaign_name": b["campaign_name"],
+            "targeting": b["targeting"],
+            "action": action_label,
+            "spend_before": round(spend_before_avg, 2),
+            "spend_after": round(spend_after_avg, 2),
+            "roas_before": roas_before,
+            "roas_after": roas_after,
+            "roas_delta": round(roas_after - roas_before, 2) if roas_before is not None else None,
+            "verdict": verdict,
+            "meaningful": spend_after_avg >= min_spend or spend_before_avg >= min_spend,
+        })
+
+    rows_out.sort(key=lambda r: r["spend_after"], reverse=True)
+
+    total_spend_after = sum(r["spend_after"] for r in rows_out) or 1
+    naive = {"BETTER": 0, "WORSE": 0, "SAME": 0, "NEW": 0}
+    weighted_spend = {"BETTER": 0.0, "WORSE": 0.0, "SAME": 0.0, "NEW": 0.0}
+    meaningful_naive = {"BETTER": 0, "WORSE": 0, "SAME": 0, "NEW": 0}
+    for r in rows_out:
+        naive[r["verdict"]] += 1
+        weighted_spend[r["verdict"]] += r["spend_after"]
+        if r["meaningful"]:
+            meaningful_naive[r["verdict"]] += 1
+
+    portfolio_spend_before = sum(r["spend_before"] for r in rows_out)
+    portfolio_sales_before = sum(
+        r["spend_before"] * r["roas_before"] for r in rows_out if r["roas_before"] is not None
+    )
+    portfolio_spend_after = total_spend_after
+    portfolio_sales_after = sum(r["spend_after"] * r["roas_after"] for r in rows_out)
+
+    summary = {
+        "cutover": cutover_date,
+        "pre_days": pre_days,
+        "min_spend": min_spend,
+        "keyword_count": len(rows_out),
+        "naive_counts": naive,
+        "meaningful_counts": meaningful_naive,
+        "spend_weighted_pct": {
+            k: round(v / total_spend_after * 100, 1) for k, v in weighted_spend.items()
+        },
+        "portfolio_roas_before": round(portfolio_sales_before / portfolio_spend_before, 2) if portfolio_spend_before else None,
+        "portfolio_roas_after": round(portfolio_sales_after / portfolio_spend_after, 2) if portfolio_spend_after else None,
+        "portfolio_spend_before": round(portfolio_spend_before, 2),
+        "portfolio_spend_after": round(portfolio_spend_after, 2),
+    }
+    return rows_out, summary
+
+
 def fetch_brand_summary(rows):
     """Groups already-fetched ROAS-impact rows by brand for the 'All Brands'
     overview - no extra query, just a reduction over what fetch_roas_impact

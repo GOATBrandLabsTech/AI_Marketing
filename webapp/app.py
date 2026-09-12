@@ -1,10 +1,12 @@
+import csv
+import io
 import os
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 
 import queries
 
@@ -40,6 +42,19 @@ def login_required(fn):
 
 def current_brand():
     return request.args.get("brand") or session.get("brand") or "Voylla"
+
+
+def csv_response(rows, columns, filename):
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(dict(r))
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.context_processor
@@ -130,6 +145,22 @@ def roas():
     )
 
 
+@app.route("/roas.csv")
+@login_required
+def roas_csv():
+    brand = current_brand()
+    since_days = int(request.args.get("since_days", 30))
+    verdict = request.args.get("verdict") or None
+    search = request.args.get("search") or None
+    rows = queries.fetch_roas_impact(brand, since_days=since_days, verdict=verdict, search=search)
+    columns = [
+        "action_date", "Brand", "campaign_name", "targeting", "action", "current_cpm",
+        "cpm_intended", "roas_before", "roas_after", "roas_change", "spend_change",
+        "was_implemented", "verdict",
+    ]
+    return csv_response(rows, columns, f"roas_impact_{brand}.csv")
+
+
 @app.route("/actions")
 @login_required
 def actions():
@@ -144,15 +175,69 @@ def actions():
             choices.append({"brand": b, "action_date": d, "count": count})
         return render_template("actions.html", chooser=choices, active="actions")
 
-    action_date = queries.fetch_latest_action_date(brand)
+    action_dates = queries.fetch_action_dates(brand)
+    requested_date = request.args.get("date")
+    action_date = requested_date or (action_dates[0] if action_dates else None)
     rows = queries.fetch_pending_actions(brand, action_date) if action_date else []
     return render_template(
         "actions.html",
         rows=rows,
         action_date=action_date,
+        action_dates=action_dates,
         action_options=queries.ACTION_OPTIONS,
         active="actions",
     )
+
+
+@app.route("/impact")
+@login_required
+def impact():
+    brand = current_brand()
+    session["brand"] = brand
+
+    if brand == queries.ALL_BRANDS:
+        return render_template("impact.html", chooser=queries.fetch_brands(), active="impact")
+
+    default_cutover = queries.CHUMBAK_SHOWCASE_GO_LIVE if brand == "Chumbak" else (date.today() - timedelta(days=1))
+    cutover = request.args.get("cutover")
+    cutover_date = date.fromisoformat(cutover) if cutover else default_cutover
+    pre_days = int(request.args.get("pre_days", 7))
+    min_spend = float(request.args.get("min_spend", 60))
+    campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" and not request.args.get("all_campaigns") else None
+
+    rows, summary = queries.fetch_before_after_matrix(
+        brand, cutover_date, pre_days=pre_days, min_spend=min_spend, campaign_ids=campaign_ids
+    )
+    return render_template(
+        "impact.html",
+        rows=rows,
+        summary=summary,
+        cutover_date=cutover_date,
+        pre_days=pre_days,
+        min_spend=min_spend,
+        scoped_to_showcase=bool(campaign_ids),
+        active="impact",
+    )
+
+
+@app.route("/impact.csv")
+@login_required
+def impact_csv():
+    brand = current_brand()
+    default_cutover = queries.CHUMBAK_SHOWCASE_GO_LIVE if brand == "Chumbak" else (date.today() - timedelta(days=1))
+    cutover = request.args.get("cutover")
+    cutover_date = date.fromisoformat(cutover) if cutover else default_cutover
+    pre_days = int(request.args.get("pre_days", 7))
+    min_spend = float(request.args.get("min_spend", 60))
+    campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" and not request.args.get("all_campaigns") else None
+    rows, _ = queries.fetch_before_after_matrix(
+        brand, cutover_date, pre_days=pre_days, min_spend=min_spend, campaign_ids=campaign_ids
+    )
+    columns = [
+        "campaign_id", "campaign_name", "targeting", "action", "spend_before", "spend_after",
+        "roas_before", "roas_after", "roas_delta", "verdict", "meaningful",
+    ]
+    return csv_response(rows, columns, f"before_after_{brand}_{cutover_date}.csv")
 
 
 @app.route("/api/actions/<unique_key>/accept", methods=["POST"])
@@ -200,6 +285,18 @@ def campaigns():
         status_counts=status_counts,
         active="campaigns",
     )
+
+
+@app.route("/campaigns.csv")
+@login_required
+def campaigns_csv():
+    brand = current_brand()
+    rows = queries.fetch_campaign_status(brand)
+    columns = [
+        "brand", "campaign_id", "campaign_name", "budget", "last_status",
+        "window_count", "next_start", "last_end",
+    ]
+    return csv_response(rows, columns, f"campaigns_{brand}.csv")
 
 
 @app.route("/api/schedule/<campaign_id>")

@@ -6,6 +6,11 @@
     <h1 class="page-title text-2xl font-bold text-ink">ROAS Impact</h1>
     <p class="text-sm mt-0.5" style="color:var(--ink-2)">Did the agent's recommendation actually help? 7 days before vs. 7 days after each action.</p>
   </div>
+  <a href="{{ url_for('roas_csv', brand=brand, since_days=since_days, verdict=verdict, search=search) }}"
+     class="text-xs font-semibold rounded-lg px-3.5 py-2 transition border" style="border-color:var(--ring); color:var(--ink-2)"
+     onmouseover="this.style.background='var(--plane)'" onmouseout="this.style.background='transparent'">
+    Download CSV
+  </a>
 </div>
 
 {% if showcase %}
@@ -83,32 +88,32 @@
 {% endif %}
 
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-  <div class="card p-5">
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, search=search) }}" class="card p-5 block transition hover:shadow-md {{ 'ring-2' if not verdict else '' }}" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not verdict else '' }}">
     <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Recommendations</div>
     <div class="font-display text-3xl font-extrabold text-ink">{{ kpi.total }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">since {{ since_date }}</div>
-  </div>
-  <div class="card p-5">
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">since {{ since_date }} &middot; click to clear filter</div>
+  </a>
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, search=search, verdict='IMPROVED') }}" class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--good)' if verdict == 'IMPROVED' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:var(--good)"></span> Improved
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--good)">{{ kpi.improved }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable</div>
-  </div>
-  <div class="card p-5">
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+  </a>
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, search=search, verdict='WORSENED') }}" class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--critical)' if verdict == 'WORSENED' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span> Worsened
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--critical)">{{ kpi.worsened }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable</div>
-  </div>
-  <div class="card p-5">
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+  </a>
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, search=search, verdict='FLAT') }}" class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--ink-muted)' if verdict == 'FLAT' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span> Flat
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--ink-2)">{{ kpi.flat }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable</div>
-  </div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+  </a>
   <div class="card p-5">
     <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Avg ROAS change</div>
     <div class="font-display text-3xl font-extrabold" style="color: {{ 'var(--good)' if kpi.avg_roas_change and kpi.avg_roas_change > 0 else 'var(--critical)' if kpi.avg_roas_change and kpi.avg_roas_change < 0 else 'var(--ink-2)' }}">

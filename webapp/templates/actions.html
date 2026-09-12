@@ -13,6 +13,17 @@
     </p>
     {% endif %}
   </div>
+  {% if not chooser and action_dates %}
+  <form method="get">
+    <input type="hidden" name="brand" value="{{ brand }}">
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Action date</label>
+    <select name="date" onchange="this.form.submit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+      {% for d in action_dates %}
+      <option value="{{ d }}" {{ 'selected' if d == action_date else '' }}>{{ d }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  {% endif %}
 </div>
 
 {% if chooser %}
