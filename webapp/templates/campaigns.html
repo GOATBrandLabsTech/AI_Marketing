@@ -118,8 +118,8 @@ function filterCampaigns() {
   countEl.textContent = q ? `${shown} of ${rows.length} campaigns` : '';
 }
 
-let currentCampaignId = null;
-let currentBrand = null;
+var currentCampaignId = null; // var, not let: this script re-runs on every soft-nav
+var currentBrand = null;
 
 function entryTemplate(e) {
   const hours = [...Array(25).keys()];

@@ -22,7 +22,7 @@
 {% if chooser %}
 <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
   {% for b in chooser %}
-  <a href="{{ url_for('impact', brand=b) }}" class="card p-5 block transition hover:shadow-md">
+  <a href="{{ url_for('impact', brand=b) }}" data-soft class="card p-5 block transition hover:shadow-md">
     <div class="font-display text-lg font-bold text-ink">{{ b }}</div>
     <div class="text-xs mt-1" style="color:var(--ink-muted)">Run before/after comparison &rarr;</div>
   </a>
@@ -41,7 +41,7 @@
   <div>Blinkit revises recent days as more conversions land &mdash; treat any date less than ~2 days old as provisional. Re-check this view in a couple of days before drawing firm conclusions.</div>
 </div>
 
-<form method="get" class="card p-4 mb-6 flex flex-wrap items-end gap-4">
+<form method="get" data-soft class="card p-4 mb-6 flex flex-wrap items-end gap-4">
   <input type="hidden" name="brand" value="{{ brand }}">
   <div>
     <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Cutover date</label>

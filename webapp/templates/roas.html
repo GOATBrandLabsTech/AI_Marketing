@@ -27,12 +27,12 @@
     </div>
   </div>
 
-  <form method="get" class="flex flex-wrap items-end gap-3 mb-4">
+  <form method="get" data-soft class="flex flex-wrap items-end gap-3 mb-4">
     <input type="hidden" name="brand" value="{{ brand }}">
     <input type="hidden" name="since_days" value="{{ since_days }}">
     <div>
       <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Action date (cutover)</label>
-      <select name="cutover" onchange="this.form.submit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+      <select name="cutover" onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
         {% for d in action_dates %}
         <option value="{{ d }}" {{ 'selected' if d == channel.cutover_date|string else '' }} style="color:#111">{{ d }}</option>
         {% endfor %}
@@ -40,7 +40,7 @@
     </div>
     <div>
       <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Compare window</label>
-      <select name="window_days" onchange="this.form.submit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+      <select name="window_days" onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
         {% for d in [3,7,14,30] %}
         <option value="{{ d }}" {{ 'selected' if d == channel.window_days else '' }} style="color:#111">{{ d }} days each side</option>
         {% endfor %}
@@ -101,7 +101,7 @@
         {% for b in brand_summary %}
         <tr class="border-b" style="border-color:var(--grid)">
           <td class="px-3 py-2 font-semibold">
-            <a href="{{ url_for('roas', brand=b.brand) }}" style="color:var(--brand)">{{ b.brand }}</a>
+            <a href="{{ url_for('roas', brand=b.brand) }}" data-soft style="color:var(--brand)">{{ b.brand }}</a>
           </td>
           <td class="px-3 py-2 text-right">{{ b.total }}</td>
           <td class="px-3 py-2 text-right font-semibold" style="color:var(--good)">{{ b.improved }}</td>
@@ -125,26 +125,26 @@
 </div>
 {% endif %}
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search) }}" class="card p-5 block transition hover:shadow-md {{ 'ring-2' if not verdict else '' }}" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not verdict else '' }}">
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search) }}" data-soft class="card p-5 block transition hover:shadow-md {{ 'ring-2' if not verdict else '' }}" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not verdict else '' }}">
     <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Recommendations</div>
     <div class="font-display text-3xl font-extrabold text-ink">{{ kpi.total }}</div>
     <div class="text-xs mt-1" style="color:var(--ink-muted)">since {{ since_date }} &middot; click to clear filter</div>
   </a>
-  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='IMPROVED') }}" class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--good)' if verdict == 'IMPROVED' else '' }}">
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='IMPROVED') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--good)' if verdict == 'IMPROVED' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:var(--good)"></span> Improved
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--good)">{{ kpi.improved }}</div>
     <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
   </a>
-  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='WORSENED') }}" class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--critical)' if verdict == 'WORSENED' else '' }}">
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='WORSENED') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--critical)' if verdict == 'WORSENED' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span> Worsened
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--critical)">{{ kpi.worsened }}</div>
     <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
   </a>
-  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='FLAT') }}" class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--ink-muted)' if verdict == 'FLAT' else '' }}">
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='FLAT') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--ink-muted)' if verdict == 'FLAT' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span> Flat
     </div>
@@ -174,12 +174,12 @@
 </div>
 {% endif %}
 
-<form method="get" class="card p-4 mb-6 flex flex-wrap items-end gap-4">
+<form method="get" data-soft class="card p-4 mb-6 flex flex-wrap items-end gap-4">
   <input type="hidden" name="brand" value="{{ brand }}">
   {% if channel %}<input type="hidden" name="cutover" value="{{ channel.cutover_date }}">{% endif %}
   <div>
     <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Lookback window (before {{ channel.cutover_date if channel else 'today' }})</label>
-    <select name="since_days" onchange="this.form.submit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+    <select name="since_days" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
       {% for d in [7,14,30,60,90] %}
       <option value="{{ d }}" {{ 'selected' if d == since_days else '' }}>Last {{ d }} days</option>
       {% endfor %}
@@ -187,7 +187,7 @@
   </div>
   <div>
     <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Verdict</label>
-    <select name="verdict" onchange="this.form.submit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+    <select name="verdict" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
       <option value="">All</option>
       {% for v in ['IMPROVED','WORSENED','FLAT'] %}
       <option value="{{ v }}" {{ 'selected' if v == verdict else '' }}>{{ v.title() }}</option>
@@ -268,6 +268,7 @@
 {% endif %}
 {% if channel %}
 <script>
+(function() {
 const trend = {{ channel.trend|tojson }};
 const cutoverLabel = {{ channel.cutover_label|tojson }};
 const isDayView = {{ (channel.granularity == 'day')|tojson }};
@@ -316,10 +317,12 @@ new Chart(document.getElementById('channelChart'), {
     }
   }
 });
+})();
 </script>
 {% endif %}
 {% if daily_series %}
 <script>
+(function() {
 const daily = {{ daily_series|tojson }};
 new Chart(document.getElementById('verdictChart'), {
   type: 'bar',
@@ -342,6 +345,7 @@ new Chart(document.getElementById('verdictChart'), {
     }
   }
 });
+})();
 </script>
 {% endif %}
 {% endblock %}

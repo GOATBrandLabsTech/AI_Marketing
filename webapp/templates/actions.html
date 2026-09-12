@@ -14,10 +14,10 @@
     {% endif %}
   </div>
   {% if not chooser and action_dates %}
-  <form method="get">
+  <form method="get" data-soft>
     <input type="hidden" name="brand" value="{{ brand }}">
     <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Action date</label>
-    <select name="date" onchange="this.form.submit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+    <select name="date" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
       {% for d in action_dates %}
       <option value="{{ d }}" {{ 'selected' if d == action_date else '' }}>{{ d }}</option>
       {% endfor %}
@@ -29,7 +29,7 @@
 {% if chooser %}
 <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
   {% for c in chooser %}
-  <a href="{{ url_for('actions', brand=c.brand) }}" class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
+  <a href="{{ url_for('actions', brand=c.brand) }}" data-soft class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
     <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">{{ c.brand }}</div>
     <div class="font-display text-2xl font-bold text-ink">{{ c.count }}</div>
     <div class="text-xs mt-1" style="color:var(--ink-muted)">
@@ -132,7 +132,7 @@
 {% endblock %}
 {% block scripts %}
 <script>
-const BRAND = {{ brand|tojson }};
+var BRAND = {{ brand|tojson }}; // var, not const: this script re-runs on every soft-nav
 
 async function submitAccept(key) {
   const accept = document.getElementById('accept-chk-' + key).checked;

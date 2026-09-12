@@ -77,3 +77,91 @@ function initSortableTable(tableId) {
     });
   });
 }
+
+// --- Soft navigation -------------------------------------------------
+// Swaps #app-shell's HTML for a fetched page's #app-shell instead of doing
+// a real browser navigation, so filter changes (day/week/month, cutover
+// date, verdict, lookback, action date, ...) feel instant: no white flash,
+// no re-fetching fonts/Tailwind, sidebar stays put. Any <a data-soft> or
+// <form data-soft> is intercepted automatically, including ones added by a
+// later page swap - the listeners are delegated on `document`, not bound
+// per-element. Links/forms that must cause a real navigation (CSV
+// downloads, sign out, login) simply don't carry `data-soft`.
+let __softNavAbort = null;
+
+function setSoftLoading(on) {
+  const bar = document.getElementById('soft-progress');
+  if (!bar) return;
+  if (on) {
+    bar.style.transition = 'none';
+    bar.style.width = '0%';
+    bar.style.opacity = '1';
+    requestAnimationFrame(() => {
+      bar.style.transition = 'width 1.2s ease';
+      bar.style.width = '80%';
+    });
+  } else {
+    bar.style.transition = 'width .2s ease';
+    bar.style.width = '100%';
+    setTimeout(() => { bar.style.opacity = '0'; bar.style.width = '0%'; }, 250);
+  }
+}
+
+function runPageScripts(container) {
+  if (!container) return;
+  container.querySelectorAll('script').forEach(old => {
+    const s = document.createElement('script');
+    Array.from(old.attributes).forEach(a => s.setAttribute(a.name, a.value));
+    if (!old.src) s.textContent = old.textContent;
+    document.body.appendChild(s);
+  });
+}
+
+async function softNavigate(url, { pushState = true } = {}) {
+  if (__softNavAbort) __softNavAbort.abort();
+  const controller = new AbortController();
+  __softNavAbort = controller;
+  setSoftLoading(true);
+  try {
+    const res = await fetch(url, { signal: controller.signal, credentials: 'same-origin' });
+    if (!res.ok) { window.location.href = url; return; }
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const newShell = doc.getElementById('app-shell');
+    if (!newShell) { window.location.href = url; return; } // e.g. bounced to /login
+    document.getElementById('app-shell').replaceWith(newShell);
+    document.title = doc.title;
+    runPageScripts(doc.getElementById('page-scripts'));
+    if (pushState) history.pushState({ soft: true }, '', url);
+    window.scrollTo(0, 0);
+  } catch (e) {
+    if (e.name !== 'AbortError') window.location.href = url;
+    return;
+  } finally {
+    setSoftLoading(false);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest('a[data-soft]');
+  if (!a) return;
+  e.preventDefault();
+  softNavigate(a.getAttribute('href'));
+});
+
+document.addEventListener('submit', (e) => {
+  const form = e.target.closest('form[data-soft]');
+  if (!form) return;
+  e.preventDefault();
+  // e.submitter carries the name/value of whichever <button type="submit">
+  // was actually clicked (e.g. the Day/Week/Month granularity buttons) -
+  // plain `new FormData(form)` silently drops that unless the submitter is
+  // passed in explicitly.
+  const formData = e.submitter ? new FormData(form, e.submitter) : new FormData(form);
+  const params = new URLSearchParams(formData).toString();
+  const action = form.getAttribute('action') || location.pathname;
+  softNavigate(action + (params ? '?' + params : ''));
+});
+
+window.addEventListener('popstate', () => softNavigate(location.href, { pushState: false }));
