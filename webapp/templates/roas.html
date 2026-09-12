@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}ROAS Impact - Blinkit Control{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h1 class="text-2xl font-bold text-ink">ROAS Impact</h1>
+    <p class="text-sm text-slate-500">Did the agent's recommendation actually help? 7 days before vs. 7 days after each action.</p>
+  </div>
+</div>
+
+<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+  <div class="card p-4">
+    <div class="text-xs text-slate-500 mb-1">Recommendations</div>
+    <div class="text-2xl font-bold text-ink">{{ kpi.total }}</div>
+    <div class="text-xs text-slate-400">since {{ since_date }}</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-xs text-slate-500 mb-1">Improved</div>
+    <div class="text-2xl font-bold text-emerald-600">{{ kpi.improved }}</div>
+    <div class="text-xs text-slate-400">of {{ kpi.scoreable }} scoreable</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-xs text-slate-500 mb-1">Worsened</div>
+    <div class="text-2xl font-bold text-red-600">{{ kpi.worsened }}</div>
+    <div class="text-xs text-slate-400">of {{ kpi.scoreable }} scoreable</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-xs text-slate-500 mb-1">Flat</div>
+    <div class="text-2xl font-bold text-slate-500">{{ kpi.flat }}</div>
+    <div class="text-xs text-slate-400">of {{ kpi.scoreable }} scoreable</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-xs text-slate-500 mb-1">Avg ROAS change</div>
+    <div class="text-2xl font-bold {{ 'text-emerald-600' if kpi.avg_roas_change and kpi.avg_roas_change > 0 else 'text-red-600' if kpi.avg_roas_change and kpi.avg_roas_change < 0 else 'text-slate-500' }}">
+      {{ '%+.2f'|format(kpi.avg_roas_change) if kpi.avg_roas_change is not none else '-' }}
+    </div>
+    <div class="text-xs text-slate-400">scoreable rows only</div>
+  </div>
+</div>
+
+<form method="get" class="card p-4 mb-6 flex flex-wrap items-end gap-4">
+  <input type="hidden" name="brand" value="{{ brand }}">
+  <div>
+    <label class="text-xs font-medium text-slate-600 block mb-1">Lookback window</label>
+    <select name="since_days" onchange="this.form.submit()" class="rounded-lg border border-slate-300 text-sm px-3 py-1.5">
+      {% for d in [7,14,30,60,90] %}
+      <option value="{{ d }}" {{ 'selected' if d == since_days else '' }}>Last {{ d }} days</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="text-xs font-medium text-slate-600 block mb-1">Verdict</label>
+    <select name="verdict" onchange="this.form.submit()" class="rounded-lg border border-slate-300 text-sm px-3 py-1.5">
+      <option value="">All</option>
+      {% for v in ['IMPROVED','WORSENED','FLAT'] %}
+      <option value="{{ v }}" {{ 'selected' if v == verdict else '' }}>{{ v.title() }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="flex-1 min-w-[200px]">
+    <label class="text-xs font-medium text-slate-600 block mb-1">Search campaign / keyword</label>
+    <input type="text" name="search" value="{{ search or '' }}" placeholder="e.g. ear rings"
+           class="w-full rounded-lg border border-slate-300 text-sm px-3 py-1.5">
+  </div>
+  <button class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-lg px-4 py-1.5">Apply</button>
+</form>
+
+<div class="card overflow-hidden">
+  <div class="overflow-x-auto max-h-[65vh]">
+    <table class="data w-full text-sm">
+      <thead>
+        <tr class="text-left text-slate-500 border-b border-slate-200">
+          <th class="px-3 py-2">Date</th>
+          <th class="px-3 py-2">Campaign</th>
+          <th class="px-3 py-2">Keyword</th>
+          <th class="px-3 py-2">Action</th>
+          <th class="px-3 py-2 text-right">CPM</th>
+          <th class="px-3 py-2 text-right">ROAS before</th>
+          <th class="px-3 py-2 text-right">ROAS after</th>
+          <th class="px-3 py-2 text-right">Δ ROAS</th>
+          <th class="px-3 py-2 text-right">Δ Spend</th>
+          <th class="px-3 py-2">Pushed?</th>
+          <th class="px-3 py-2">Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="border-b border-slate-100 hover:bg-slate-50" title="{{ r.explanation or '' }}">
+          <td class="px-3 py-2 whitespace-nowrap text-slate-500">{{ r.action_date }}</td>
+          <td class="px-3 py-2">{{ r.campaign_name }}</td>
+          <td class="px-3 py-2">
+            {{ r.targeting }}
+            {% if r.diverged %}<span class="badge bg-amber-100 text-amber-700 ml-1">diverged</span>{% endif %}
+          </td>
+          <td class="px-3 py-2 whitespace-nowrap">{{ r.action }}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
+            {{ r.current_cpm }}{% if r.cpm_intended %} → {{ r.cpm_intended }}{% endif %}
+          </td>
+          <td class="px-3 py-2 text-right">{{ r.roas_before if r.roas_before is not none else '-' }}</td>
+          <td class="px-3 py-2 text-right">{{ r.roas_after if r.roas_after is not none else '-' }}</td>
+          <td class="px-3 py-2 text-right font-semibold {{ 'text-emerald-600' if r.roas_change and r.roas_change > 0 else 'text-red-600' if r.roas_change and r.roas_change < 0 else 'text-slate-400' }}">
+            {{ r.roas_change if r.roas_change is not none else '-' }}
+          </td>
+          <td class="px-3 py-2 text-right">{{ r.spend_change if r.spend_change is not none else '-' }}</td>
+          <td class="px-3 py-2">
+            {% if r.was_implemented %}<span class="badge bg-brand-100 text-brand-700">pushed</span>
+            {% else %}<span class="badge bg-slate-100 text-slate-500">proposed</span>{% endif %}
+          </td>
+          <td class="px-3 py-2">
+            {% if r.verdict == 'IMPROVED' %}<span class="badge bg-emerald-100 text-emerald-700">Improved</span>
+            {% elif r.verdict == 'WORSENED' %}<span class="badge bg-red-100 text-red-700">Worsened</span>
+            {% elif r.verdict == 'FLAT' %}<span class="badge bg-slate-200 text-slate-600">Flat</span>
+            {% else %}<span class="text-slate-300">-</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="11" class="px-3 py-8 text-center text-slate-400">No rows for this filter.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

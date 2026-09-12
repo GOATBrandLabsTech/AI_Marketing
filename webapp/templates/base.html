@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Blinkit Marketing Control{% endblock %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#0f172a',
+          brand: { 50:'#eff6ff',100:'#dbeafe',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8' }
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+  .badge { display:inline-flex; align-items:center; padding:.15rem .55rem; border-radius:9999px; font-size:.72rem; font-weight:600; letter-spacing:.02em; }
+  .card { background:#fff; border:1px solid #e2e8f0; border-radius:.75rem; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+  table.data th { position: sticky; top: 0; background:#f8fafc; z-index:1; }
+  ::-webkit-scrollbar { height:8px; width:8px; }
+  ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-900">
+{% if session.get('authed') %}
+<div class="min-h-screen flex">
+  <aside class="w-60 shrink-0 bg-ink text-slate-200 flex flex-col">
+    <div class="px-5 py-5 border-b border-slate-700/60">
+      <div class="text-white font-bold text-lg leading-tight">Blinkit Control</div>
+      <div class="text-xs text-slate-400">AI marketing automation</div>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
+      <a href="{{ url_for('roas', brand=brand) }}" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 {{ 'bg-slate-800 text-white' if active=='roas' else '' }}">
+        <span>ROAS Impact</span>
+      </a>
+      <a href="{{ url_for('actions', brand=brand) }}" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 {{ 'bg-slate-800 text-white' if active=='actions' else '' }}">
+        <span>Pending Actions</span>
+      </a>
+      <a href="{{ url_for('campaigns', brand=brand) }}" class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800 {{ 'bg-slate-800 text-white' if active=='campaigns' else '' }}">
+        <span>Campaigns &amp; Budget</span>
+      </a>
+    </nav>
+    <div class="px-3 py-4 border-t border-slate-700/60">
+      <form method="get" action="{{ request.path }}" class="mb-3">
+        <label class="text-xs text-slate-400 block mb-1">Brand</label>
+        <select name="brand" onchange="this.form.submit()" class="w-full rounded-lg bg-slate-800 text-white text-sm px-2 py-1.5 border border-slate-700">
+          {% for b in brands %}
+            <option value="{{ b }}" {{ 'selected' if b == brand else '' }}>{{ b }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      <a href="{{ url_for('logout') }}" class="text-xs text-slate-400 hover:text-white">Sign out</a>
+    </div>
+  </aside>
+  <main class="flex-1 min-w-0">
+    <div id="toast" class="hidden fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg"></div>
+    <div class="p-6 lg:p-8">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+{% else %}
+{% block guest %}{% endblock %}
+{% endif %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

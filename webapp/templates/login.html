@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Sign in - Blinkit Control{% endblock %}
+{% block guest %}
+<div class="min-h-screen flex items-center justify-center bg-slate-100">
+  <div class="card w-full max-w-sm p-8">
+    <div class="text-xl font-bold text-ink mb-1">Blinkit Control</div>
+    <div class="text-sm text-slate-500 mb-6">AI marketing automation dashboard</div>
+    {% if error %}
+    <div class="mb-4 rounded-lg bg-red-50 text-red-700 text-sm px-3 py-2">{{ error }}</div>
+    {% endif %}
+    <form method="post">
+      <label class="text-xs font-medium text-slate-600 block mb-1">Password</label>
+      <input type="password" name="password" autofocus
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      <button class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-lg py-2.5">Sign in</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
