@@ -8,7 +8,7 @@
     <p class="text-sm mt-0.5" style="color:var(--ink-2)">Pick a brand to review its AI recommendations.</p>
     {% else %}
     <p class="text-sm mt-0.5" style="color:var(--ink-2)">
-      {{ rows|length }} AI recommendations for <span class="font-semibold text-ink">{{ action_date }}</span> &middot; {{ brand }}.
+      {{ rows|length }}{% if action_filter %} of {{ total_count }}{% endif %} AI recommendations for <span class="font-semibold text-ink">{{ action_date }}</span> &middot; {{ brand }}.
       Accept, adjust the CPM change, or override the action entirely.
     </p>
     {% endif %}
@@ -16,6 +16,7 @@
   {% if not chooser and action_dates %}
   <form method="get" data-soft>
     <input type="hidden" name="brand" value="{{ brand }}">
+    {% if action_filter %}<input type="hidden" name="action" value="{{ action_filter }}">{% endif %}
     <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Action date</label>
     <select name="date" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
       {% for d in action_dates %}
@@ -25,6 +26,34 @@
   </form>
   {% endif %}
 </div>
+
+{% if not chooser and action_counts %}
+{% set action_colors = {
+  'NO_CHANGE':     {'bg': '#eeeeec', 'fg': 'var(--ink-2)',    'dot': '#c3c2b7'},
+  'INCREASE_CPM':  {'bg': 'var(--brand-50)', 'fg': 'var(--brand-dark)', 'dot': 'var(--brand)'},
+  'DECREASE_CPM':  {'bg': '#fef3e2', 'fg': '#8a5a00',          'dot': 'var(--warning)'},
+  'PAUSE':         {'bg': '#fbeaea', 'fg': '#9c2626',          'dot': 'var(--critical)'},
+  'ZOMBIE_FLAG':   {'bg': '#efeafb', 'fg': '#5b3fb8',          'dot': '#4a3aa7'},
+} %}
+<div class="mb-6">
+  <div class="text-sm font-semibold text-ink mb-3">By action <span class="font-normal" style="color:var(--ink-muted)">&mdash; click to filter</span></div>
+  <div class="flex flex-wrap gap-3">
+    <a href="{{ url_for('actions', brand=brand, date=action_date) }}" data-soft
+       class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not action_filter else '' }}">
+      <div class="font-display text-xl font-bold text-ink">{{ total_count }}</div>
+      <div class="text-xs" style="color:var(--ink-muted)">All</div>
+    </a>
+    {% for name, count in action_counts.items()|sort(attribute='1', reverse=true) %}
+    {% set c = action_colors.get(name, {'bg': '#f2f2f0', 'fg': 'var(--ink-muted)', 'dot': '#d5d4cf'}) %}
+    <a href="{{ url_for('actions', brand=brand, date=action_date, action=name) }}" data-soft
+       class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px ' ~ c.dot if action_filter == name else '' }}">
+      <div class="font-display text-xl font-bold" style="color:{{ c.fg }}">{{ count }}</div>
+      <div class="text-xs flex items-center gap-1.5" style="color:var(--ink-muted)"><span class="w-1.5 h-1.5 rounded-full" style="background:{{ c.dot }}"></span>{{ name }}</div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {% if chooser %}
 <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">

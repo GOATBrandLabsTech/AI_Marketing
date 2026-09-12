@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+from collections import Counter
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from functools import wraps
@@ -239,10 +240,18 @@ def actions():
     action_dates = queries.fetch_action_dates(brand)
     requested_date = request.args.get("date")
     action_date = requested_date or (action_dates[0] if action_dates else None)
-    rows = queries.fetch_pending_actions(brand, action_date) if action_date else []
+    all_rows = queries.fetch_pending_actions(brand, action_date) if action_date else []
+
+    action_counts = Counter(r["action"] for r in all_rows)
+    action_filter = request.args.get("action") or None
+    rows = [r for r in all_rows if not action_filter or r["action"] == action_filter]
+
     return render_template(
         "actions.html",
         rows=rows,
+        total_count=len(all_rows),
+        action_counts=action_counts,
+        action_filter=action_filter,
         action_date=action_date,
         action_dates=action_dates,
         action_options=queries.ACTION_OPTIONS,
