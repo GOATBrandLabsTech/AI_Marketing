@@ -385,6 +385,37 @@ def fetch_action_dates(brand, limit=30):
         return [r["action_date"] for r in cur.fetchall()]
 
 
+# Expectation tolerances by action type - the bar an action must clear to
+# count as "met expectations". This is a stated, rules-based bar, not a
+# predictive/ML forecast - each threshold is one sentence to defend, not a
+# fitted model, and can be retuned here without touching anything else.
+EXPECTATION_TOLERANCE = {
+    "DECREASE": 0.95,   # cut a bid → efficiency should hold within 5% or improve
+    "INCREASE": 0.80,   # raised a bid → up to 20% softer ROAS is an acceptable trade for volume
+    "HOLD": 0.85,       # NO_CHANGE → should stay within 15% either way
+}
+
+
+def _expectation_verdict(action, roas_before, roas_after, verdict):
+    action = (action or "").upper()
+    if verdict == "PAUSED":
+        return "MET", "spend stopped, as intended"
+    if verdict in ("STOPPED", "NEW") or roas_before is None or roas_after is None:
+        return "N/A", "no comparable baseline"
+    if "ZOMBIE" in action or "INSUFFICIENT" in action:
+        return "N/A", "monitoring flag, not a bid decision"
+    if "DECREASE" in action:
+        bar = round(roas_before * EXPECTATION_TOLERANCE["DECREASE"], 2)
+        reason = f"cut a bid - expected ROAS >= {bar} (hold or improve)"
+    elif "INCREASE" in action:
+        bar = round(roas_before * EXPECTATION_TOLERANCE["INCREASE"], 2)
+        reason = f"raised a bid - expected ROAS >= {bar} (some softening for volume is OK)"
+    else:
+        bar = round(roas_before * EXPECTATION_TOLERANCE["HOLD"], 2)
+        reason = f"held the bid - expected ROAS >= {bar} (should stay roughly stable)"
+    return ("MET" if roas_after >= bar else "MISSED"), reason
+
+
 def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, campaign_ids=None):
     """Per-keyword before/after comparison, portfolio-style: BEFORE is the
     daily average over `pre_days` days ending the day before cutover_date,
@@ -485,6 +516,8 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
             # looks identical to "no data" otherwise) from the analysis.
             if spend_before_avg <= 0:
                 continue  # never ran in either window - genuinely not relevant
+            row_verdict = "PAUSED" if "PAUSE" in (action_label or "") else "STOPPED"
+            expectation, expectation_reason = _expectation_verdict(action_label, roas_before, None, row_verdict)
             rows_out.append({
                 "campaign_id": b["campaign_id"],
                 "campaign_name": b["campaign_name"],
@@ -495,7 +528,9 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
                 "roas_before": roas_before,
                 "roas_after": None,
                 "roas_delta": None,
-                "verdict": "PAUSED" if "PAUSE" in (action_label or "") else "STOPPED",
+                "verdict": row_verdict,
+                "expectation": expectation,
+                "expectation_reason": expectation_reason,
                 "meaningful": spend_before_avg >= min_spend,
             })
             continue
@@ -513,6 +548,8 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
         else:
             verdict = "SAME"
 
+        expectation, expectation_reason = _expectation_verdict(action_label, roas_before, roas_after, verdict)
+
         rows_out.append({
             "campaign_id": b["campaign_id"],
             "campaign_name": b["campaign_name"],
@@ -524,6 +561,8 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
             "roas_after": roas_after,
             "roas_delta": round(roas_after - roas_before, 2) if roas_before is not None else None,
             "verdict": verdict,
+            "expectation": expectation,
+            "expectation_reason": expectation_reason,
             "meaningful": spend_after_avg >= min_spend or spend_before_avg >= min_spend,
         })
 
@@ -535,6 +574,8 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
     weighted_spend = {k: 0.0 for k in verdict_keys}
     meaningful_naive = {k: 0 for k in verdict_keys}
     spend_saved = 0.0
+    expectation_counts = {"MET": 0, "MISSED": 0, "N/A": 0}
+    expectation_spend = {"MET": 0.0, "MISSED": 0.0}
     for r in rows_out:
         naive[r["verdict"]] += 1
         weighted_spend[r["verdict"]] += r["spend_after"]
@@ -542,6 +583,12 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
             meaningful_naive[r["verdict"]] += 1
         if r["verdict"] == "PAUSED":
             spend_saved += r["spend_before"]
+        if r["meaningful"]:
+            expectation_counts[r["expectation"]] += 1
+            if r["expectation"] in expectation_spend:
+                expectation_spend[r["expectation"]] += max(r["spend_after"], r["spend_before"])
+
+    scored_spend = expectation_spend["MET"] + expectation_spend["MISSED"]
 
     portfolio_spend_before = sum(r["spend_before"] for r in rows_out)
     portfolio_sales_before = sum(
@@ -567,6 +614,8 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
         "portfolio_spend_before": round(portfolio_spend_before, 2),
         "portfolio_spend_after": round(portfolio_spend_after, 2),
         "spend_saved": round(spend_saved, 2),
+        "expectation_counts": expectation_counts,
+        "expectation_met_pct_by_spend": round(expectation_spend["MET"] / scored_spend * 100, 1) if scored_spend else None,
     }
     return rows_out, summary
 

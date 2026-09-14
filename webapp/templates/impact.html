@@ -34,6 +34,7 @@
   <div class="font-semibold text-ink mb-1">How to read this page</div>
   Pick a <strong>cutover date</strong> below &mdash; usually the day a bid change went live. For every keyword, we take its average daily spend/sales for the days <em>before</em> that date and compare it to the days <em>after</em>.
   A keyword can look "worse" just because it barely spent anything (a single missing sale swings its ROAS wildly) &mdash; that's what the <strong>noise cutoff</strong> filters out, and why we show two summary numbers: a plain count of keywords, and the same count weighted by how much money was actually behind it. The weighted one is the one to trust.
+  The <strong>Expectation</strong> column is a stated bar per action type, checked after the fact &mdash; not a predictive model. A cut is expected to hold or improve ROAS; a raise is allowed to soften up to 20% (you're buying volume); a hold should stay roughly flat. Hover any row's Expectation badge for its exact number.
 </div>
 
 <div class="rounded-xl px-4 py-3 mb-6 text-xs flex items-start gap-2" style="background:#fef3e2;color:#8a5a00;">
@@ -69,7 +70,7 @@
           onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">Run</button>
 </form>
 
-<div class="grid md:grid-cols-3 gap-4 mb-6">
+<div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
   <div class="card p-5">
     <div class="text-sm font-semibold text-ink mb-3">By keyword count <span class="font-normal" style="color:var(--ink-muted)">(misleading if spend is skewed)</span></div>
     <div class="grid grid-cols-3 gap-3 text-center">
@@ -127,6 +128,27 @@
       &#8377;{{ '{:,.0f}'.format(summary.spend_saved) }}/day of spend stopped by PAUSE actions &mdash; these went to zero on purpose, so they're excluded from the Better/Worse verdict above rather than counted as "Worse."
     </div>
   </div>
+  <div class="card p-5">
+    <div class="text-sm font-semibold text-ink mb-3">Expectations <span class="font-normal" style="color:var(--ink-muted)">(rule-based, not a forecast model)</span></div>
+    <div class="grid grid-cols-2 gap-3 text-center">
+      <div>
+        <div class="font-display text-2xl font-bold" style="color:var(--good)">{{ summary.expectation_counts.MET }}</div>
+        <div class="text-xs" style="color:var(--ink-muted)">Met</div>
+      </div>
+      <div>
+        <div class="font-display text-2xl font-bold" style="color:var(--critical)">{{ summary.expectation_counts.MISSED }}</div>
+        <div class="text-xs" style="color:var(--ink-muted)">Missed</div>
+      </div>
+    </div>
+    <div class="text-xs mt-3 pt-3 border-t" style="border-color:var(--grid); color:var(--ink-muted)">
+      {% if summary.expectation_met_pct_by_spend is not none %}
+      <strong>{{ summary.expectation_met_pct_by_spend }}%</strong> of scored spend met its expectation.
+      {% else %}
+      Not enough scoreable keywords yet.
+      {% endif %}
+      Each action type has its own bar (cuts must hold ROAS, raises may soften up to 20%, holds must stay within 15%) &mdash; see any row's tooltip for its exact bar.
+    </div>
+  </div>
 </div>
 
 <div class="card overflow-hidden">
@@ -141,6 +163,7 @@
           <th class="px-4 py-3 text-right" data-sortable>ROAS before &rarr; after</th>
           <th class="px-4 py-3 text-right" data-sortable>&Delta;</th>
           <th class="px-4 py-3" data-sortable>Verdict</th>
+          <th class="px-4 py-3" data-sortable>Expectation</th>
         </tr>
       </thead>
       <tbody>
@@ -169,9 +192,14 @@
             {% else %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>Same</span>{% endif %}
             {% if not r.meaningful %}<span class="text-[10px] ml-1" style="color:var(--ink-muted)">noise</span>{% endif %}
           </td>
+          <td class="px-4 py-2.5" data-sort="{{ r.expectation }}" title="{{ r.expectation_reason }}">
+            {% if r.expectation == 'MET' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>Met</span>
+            {% elif r.expectation == 'MISSED' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>Missed</span>
+            {% else %}<span style="color:#d5d4cf">-</span>{% endif %}
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No comparable keywords for this window.</td></tr>
+        <tr><td colspan="8" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No comparable keywords for this window.</td></tr>
         {% endfor %}
       </tbody>
     </table>

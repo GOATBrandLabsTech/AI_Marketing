@@ -307,6 +307,7 @@ def impact_csv():
     columns = [
         "campaign_id", "campaign_name", "targeting", "action", "spend_before", "spend_after",
         "roas_before", "roas_after", "roas_delta", "verdict", "meaningful",
+        "expectation", "expectation_reason",
     ]
     return csv_response(rows, columns, f"before_after_{brand}_{cutover_date}.csv")
 

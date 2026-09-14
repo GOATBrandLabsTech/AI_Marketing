@@ -64,8 +64,11 @@ TOOLS = [
         "name": "get_before_after_keywords",
         "description": (
             "Per-keyword before/after ROAS comparison around a cutover date, spend-weighted "
-            "verdict summary (better/worse/same/paused), and the top keywords by spend. Use for "
-            "'which keywords got better/worse', 'did the pauses help', 'what moved the ROAS'."
+            "verdict summary (better/worse/same/paused), an EXPECTATION verdict per row (met/"
+            "missed/n-a against a stated rule-based bar for that action type - not a predictive "
+            "model), and the top keywords by spend. Use for 'which keywords got better/worse', "
+            "'did the pauses help', 'what moved the ROAS', 'is this meeting expectations', "
+            "'are we on track', or any forecast/expectation question."
         ),
         "input_schema": {
             "type": "object",
