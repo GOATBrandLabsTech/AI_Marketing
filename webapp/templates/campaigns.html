@@ -47,6 +47,7 @@
           <th class="px-4 py-3" data-sortable>Campaign</th>
           <th class="px-4 py-3 text-right" data-sortable>Budget</th>
           <th class="px-4 py-3" data-sortable>Status</th>
+          <th class="px-4 py-3" data-sortable>Mode</th>
           <th class="px-4 py-3 text-right" data-sortable>Windows</th>
           <th class="px-4 py-3" data-sortable>Next start</th>
           <th class="px-4 py-3" data-sortable>Last end</th>
@@ -69,6 +70,14 @@
             {% elif r.last_status %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>{{ r.last_status }}</span>
             {% else %}<span style="color:#d5d4cf">-</span>{% endif %}
           </td>
+          <td class="px-4 py-2.5" data-sort="{{ r.autonomy_mode }}">
+            <select class="text-xs rounded-lg border px-2 py-1" style="border-color:var(--ring)"
+                    onchange="setMode('{{ r.campaign_id }}', '{{ r.brand }}', this.value, this)">
+              {% for m in ['auto','semi_auto','manual'] %}
+              <option value="{{ m }}" {{ 'selected' if r.autonomy_mode == m else '' }}>{{ {'auto':'Auto','semi_auto':'Semi-auto','manual':'Manual'}[m] }}</option>
+              {% endfor %}
+            </select>
+          </td>
           <td class="px-4 py-2.5 text-right">{{ r.window_count }}</td>
           <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.next_start or '-' }}</td>
           <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.last_end or '-' }}</td>
@@ -79,7 +88,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="{{ 8 if brand == ALL_BRANDS else 7 }}" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No campaigns found for this brand.</td></tr>
+        <tr><td colspan="{{ 9 if brand == ALL_BRANDS else 8 }}" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No campaigns found for this brand.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -105,6 +114,23 @@
 {% block scripts %}
 <script>initSortableTable('campaignsTable');</script>
 <script>
+async function setMode(campaignId, brand, mode, selectEl) {
+  const prev = selectEl.dataset.prev || selectEl.value;
+  if (mode === 'auto' && !confirm(
+    'Auto mode means the AI accepts and pushes its own bid recommendations for this campaign with no human review. Continue?'
+  )) {
+    selectEl.value = prev;
+    return;
+  }
+  try {
+    await postJSON(`/api/campaigns/${encodeURIComponent(campaignId)}/mode`, { brand, mode });
+    selectEl.dataset.prev = mode;
+    toast('Mode updated', true);
+  } catch (e) {
+    selectEl.value = prev;
+  }
+}
+
 function filterCampaigns() {
   const q = document.getElementById('campaignSearch').value.trim().toLowerCase();
   const rows = document.querySelectorAll('#campaignsTable tbody tr[data-search]');

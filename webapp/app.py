@@ -9,6 +9,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 
+import chat
 import queries
 
 load_dotenv()
@@ -420,6 +421,63 @@ def api_schedule_save(entry_id):
 def api_schedule_remove(entry_id):
     queries.remove_schedule_window(entry_id)
     return jsonify({"ok": True})
+
+
+@app.route("/api/campaigns/<campaign_id>/mode", methods=["POST"])
+@login_required
+def api_set_campaign_mode(campaign_id):
+    payload = request.get_json(force=True) or {}
+    mode = payload.get("mode")
+    brand = payload.get("brand", current_brand())
+    if mode not in queries.AUTONOMY_MODES:
+        return jsonify({"error": f"mode must be one of {queries.AUTONOMY_MODES}"}), 400
+    queries.set_autonomy_mode(campaign_id, brand, mode, set_by=session.get("brand"))
+    return jsonify({"ok": True})
+
+
+@app.route("/chat")
+@login_required
+def chat_page():
+    brand = current_brand()
+    session["brand"] = brand
+    threads = chat.list_threads(brand)
+    thread_id = request.args.get("thread")
+    if not thread_id and threads:
+        thread_id = threads[0]["thread_id"]
+    messages = chat.get_messages(thread_id) if thread_id else []
+    return render_template(
+        "chat.html", threads=threads, thread_id=thread_id, messages=messages, active="chat"
+    )
+
+
+@app.route("/api/chat/threads", methods=["POST"])
+@login_required
+def api_chat_new_thread():
+    brand = current_brand()
+    thread_id = chat.create_thread(brand)
+    return jsonify({"thread_id": thread_id})
+
+
+@app.route("/api/chat/threads/<thread_id>/messages", methods=["GET"])
+@login_required
+def api_chat_messages(thread_id):
+    rows = chat.get_messages(thread_id)
+    return jsonify({"messages": [dictify(r) for r in rows]})
+
+
+@app.route("/api/chat/threads/<thread_id>/messages", methods=["POST"])
+@login_required
+def api_chat_send(thread_id):
+    payload = request.get_json(force=True) or {}
+    message = (payload.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+    brand = payload.get("brand", current_brand())
+    try:
+        reply, tool_log = chat.send_message(thread_id, brand, message)
+    except Exception as exc:
+        return jsonify({"error": f"chat failed: {exc}"}), 502
+    return jsonify({"reply": reply, "tools_used": [t["tool"] for t in tool_log]})
 
 
 if __name__ == "__main__":

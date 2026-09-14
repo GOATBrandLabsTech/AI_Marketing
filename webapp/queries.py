@@ -14,6 +14,13 @@ ACTION_OPTIONS = ["NO_CHANGE", "INCREASE_CPM", "DECREASE_CPM", "PAUSE", "ZOMBIE_
 
 ALL_BRANDS = "__ALL__"
 
+AUTONOMY_MODES = ["auto", "semi_auto", "manual"]
+AUTONOMY_MODE_LABELS = {
+    "auto": "Auto - AI runs it",
+    "semi_auto": "Semi-auto - human approves",
+    "manual": "Manual - advisory only",
+}
+
 # The Chumbak AI-bids-only experiment: a deliberately single-variable test of
 # the bid agent (pacing schedule paused so the ROAS delta is attributable to
 # the agent alone). Live from 2026-09-10 across these 12 campaigns; 4
@@ -200,7 +207,39 @@ def fetch_roas_impact(brand, since_date, verdict=None, search=None):
 def fetch_campaign_status(brand):
     with get_cursor() as cur:
         cur.execute(CAMPAIGN_STATUS_SQL, {"brand": brand})
-        return cur.fetchall()
+        rows = cur.fetchall()
+    modes = fetch_autonomy_modes(brand)
+    for r in rows:
+        r["autonomy_mode"] = modes.get(str(r["campaign_id"]), "semi_auto")
+    return rows
+
+
+def fetch_autonomy_modes(brand):
+    """campaign_id -> mode for every campaign that has an explicit setting;
+    anything absent defaults to 'semi_auto' (today's behaviour: AI proposes,
+    a human accepts) so this table only needs a row when someone changes a
+    campaign away from the default."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT campaign_id, mode FROM voylla.campaign_autonomy_mode WHERE brand = %(brand)s",
+            {"brand": brand},
+        )
+        return {r["campaign_id"]: r["mode"] for r in cur.fetchall()}
+
+
+def set_autonomy_mode(campaign_id, brand, mode, set_by=None):
+    if mode not in AUTONOMY_MODES:
+        raise ValueError(f"mode must be one of {AUTONOMY_MODES}")
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO voylla.campaign_autonomy_mode (campaign_id, brand, mode, set_by, set_at)
+            VALUES (%(campaign_id)s, %(brand)s, %(mode)s, %(set_by)s, NOW())
+            ON CONFLICT (campaign_id, brand) DO UPDATE
+                SET mode = EXCLUDED.mode, set_by = EXCLUDED.set_by, set_at = NOW()
+            """,
+            {"campaign_id": str(campaign_id), "brand": brand, "mode": mode, "set_by": set_by},
+        )
 
 
 def fetch_channel_daily(brand, days=180, campaign_ids=None):

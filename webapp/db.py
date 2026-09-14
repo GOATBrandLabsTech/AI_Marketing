@@ -8,6 +8,9 @@ import psycopg2.extras
 DEFAULT_CRED_FILE = str(
     Path.home() / "Documents" / "Python_Scripts" / "Voylla_Cred.txt"
 )
+DEFAULT_ANTHROPIC_KEY_FILE = str(
+    Path.home() / "Documents" / "Python_Scripts" / "Claude_api_key.txt"
+)
 
 
 def _load_cred_file(path):
@@ -30,6 +33,23 @@ def get_db_config():
         }
     cred_path = os.environ.get("WEBAPP_CRED_FILE", DEFAULT_CRED_FILE)
     return _load_cred_file(cred_path)
+
+
+def get_anthropic_config():
+    """Reuses the same key already used by the batch-decision notebooks
+    (Blinkit_actions_llm_marketing_Batch_Api.ipynb) - Claude_api_key.txt is
+    two lines: model name, then the API key."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return {
+            "api_key": os.environ["ANTHROPIC_API_KEY"],
+            "model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+        }
+    key_path = os.environ.get("ANTHROPIC_KEY_FILE", DEFAULT_ANTHROPIC_KEY_FILE)
+    with open(key_path, encoding="utf-8") as f:
+        lines = [line.strip() for line in f if line.strip()]
+    if len(lines) < 2:
+        raise RuntimeError(f"{key_path} should have 2 lines: model, then API key")
+    return {"model": lines[0], "api_key": lines[1]}
 
 
 @contextmanager
