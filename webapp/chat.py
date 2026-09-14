@@ -9,7 +9,8 @@ sessions and becomes part of the same "memory" the rest of the app reads.
 """
 import json
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 
 import anthropic
 
@@ -134,9 +135,21 @@ TOOLS = [
 
 
 def _jsonable(v):
+    """json.dumps(default=...) calls this ONLY for values it can't already
+    serialize. Returning `v` unchanged for a type we don't recognise (e.g.
+    Decimal, from any NUMERIC/DECIMAL Postgres column) hands json.dumps the
+    exact same non-serializable object right back - it calls default() on it
+    again, forever, until Python's json module gives up with "Circular
+    reference detected". Every branch here must return a JSON-primitive
+    type; the final str(v) fallback guarantees that even for a type nobody
+    thought to add explicitly."""
     if isinstance(v, (date, datetime)):
         return v.isoformat()
-    return v
+    if isinstance(v, time):
+        return v.strftime("%H:%M:%S")
+    if isinstance(v, Decimal):
+        return float(v)
+    return str(v)
 
 
 def _cap_rows(rows, n, key=None):
