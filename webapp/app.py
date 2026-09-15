@@ -386,7 +386,11 @@ def api_ondemand_generate():
 
     import ondemand_engine
 
-    result = ondemand_engine.generate_ondemand_suggestions(brand, campaign_id, requested_by="dashboard")
+    try:
+        result = ondemand_engine.generate_ondemand_suggestions(brand, campaign_id, requested_by="dashboard")
+    except Exception as exc:
+        app.logger.exception("on-demand generation failed")
+        return jsonify({"ok": False, "count": 0, "rows": [], "error": f"{type(exc).__name__}: {exc}"}), 500
     return jsonify(result), (200 if result["ok"] else 500)
 
 

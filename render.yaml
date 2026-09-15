@@ -6,7 +6,7 @@ services:
     branch: claude/blinkit-agent-roas-analysis-c4de2b
     rootDir: webapp
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --timeout 180
     envVars:
       - key: DASHBOARD_PASSWORD
         sync: false
