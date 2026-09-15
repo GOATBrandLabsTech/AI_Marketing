@@ -43,7 +43,7 @@ def login_required(fn):
 
 
 def current_brand():
-    return request.args.get("brand") or session.get("brand") or "Voylla"
+    return request.args.get("brand") or session.get("brand") or "Chumbak"
 
 
 @app.template_filter("steps")
