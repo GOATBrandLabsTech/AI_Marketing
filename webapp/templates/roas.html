@@ -73,7 +73,7 @@
     </div>
     <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
       <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">After &middot; since {{ channel.cutover_date }}</div>
-      <div class="font-display text-2xl font-bold" style="color: {{ '#3ddc6a' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas > channel.before_after.before.roas else '#ff8a80' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas < channel.before_after.before.roas else '#fff' }}">
+      <div class="font-display text-2xl font-bold" style="color: {{ ('#3ddc6a' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas > channel.before_after.before.roas else '#ff8a80' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas < channel.before_after.before.roas else '#fff') if channel.decisions_on_cutover else '#fff' }}">
         {{ channel.before_after.after.roas if channel.before_after.after.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span>
       </div>
       <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.after.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.after.sales) }} sales &middot; {{ channel.before_after.after.days }} days</div>
@@ -279,6 +279,7 @@
 const trend = {{ channel.trend|tojson }};
 const cutoverLabel = {{ channel.cutover_label|tojson }};
 const isDayView = {{ (channel.granularity == 'day')|tojson }};
+const hadDecisions = {{ ((channel.decisions_on_cutover or 0) > 0) | tojson }};
 
 // Week/month buckets can straddle the cutover date, so a clean before/after
 // color split only makes sense at day granularity - otherwise show one line.
@@ -288,10 +289,12 @@ if (isDayView) {
   const before = trend.map((d, i) => (cutoverIdx === -1 || i < cutoverIdx) ? d.roas : null);
   const after = trend.map((d, i) => (cutoverIdx !== -1 && i >= cutoverIdx) ? d.roas : null);
   if (cutoverIdx > 0) before[cutoverIdx] = trend[cutoverIdx].roas; // connect the segments visually
+  const afterColor = hadDecisions ? '#3987e5' : '#7d93b5';
+  const afterFill = hadDecisions ? 'rgba(57,135,229,.18)' : 'rgba(125,147,181,.12)';
   datasets = [
     { label: 'Before', data: before, borderColor: '#7d93b5', backgroundColor: 'rgba(125,147,181,.12)',
       borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12, tension: .25, fill: true, spanGaps: true },
-    { label: 'After (AI)', data: after, borderColor: '#3987e5', backgroundColor: 'rgba(57,135,229,.18)',
+    { label: hadDecisions ? 'After (AI)' : 'After (nothing implemented)', data: after, borderColor: afterColor, backgroundColor: afterFill,
       borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12, tension: .25, fill: true, spanGaps: true },
   ];
 } else {
