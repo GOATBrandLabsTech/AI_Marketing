@@ -13,23 +13,23 @@
   </a>
 </div>
 
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-  <div class="card p-4">
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6" id="statusTiles">
+  <button type="button" onclick="filterByStatus('ACTIVE', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="ACTIVE">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--good)"></span>Active</div>
     <div class="font-display text-2xl font-bold" style="color:var(--good)">{{ status_counts.get('ACTIVE', 0) }}</div>
-  </div>
-  <div class="card p-4">
+  </button>
+  <button type="button" onclick="filterByStatus('STOPPED,ON_HOLD', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="STOPPED,ON_HOLD">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--warning)"></span>Stopped / on hold</div>
     <div class="font-display text-2xl font-bold" style="color:#8a5a00">{{ status_counts.get('STOPPED', 0) + status_counts.get('ON_HOLD', 0) }}</div>
-  </div>
-  <div class="card p-4">
+  </button>
+  <button type="button" onclick="filterByStatus('BUDGET_EXHAUSTED', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="BUDGET_EXHAUSTED">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span>Budget exhausted</div>
     <div class="font-display text-2xl font-bold" style="color:var(--critical)">{{ status_counts.get('BUDGET_EXHAUSTED', 0) }}</div>
-  </div>
-  <div class="card p-4">
+  </button>
+  <button type="button" onclick="filterByStatus('', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="" style="box-shadow:0 0 0 2px var(--brand)">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span>Total campaigns</div>
     <div class="font-display text-2xl font-bold text-ink">{{ rows|length }}</div>
-  </div>
+  </button>
 </div>
 
 <div class="mb-4">
@@ -56,7 +56,7 @@
       </thead>
       <tbody>
         {% for r in rows %}
-        <tr class="border-b" style="border-color:var(--grid)" data-search="{{ (r.campaign_name ~ ' ' ~ r.campaign_id)|lower }}">
+        <tr class="border-b" style="border-color:var(--grid)" data-search="{{ (r.campaign_name ~ ' ' ~ r.campaign_id)|lower }}" data-status="{{ r.last_status or '' }}">
           {% if brand == ALL_BRANDS %}<td class="px-4 py-2.5" style="color:var(--ink-2)">{{ r.brand }}</td>{% endif %}
           <td class="px-4 py-2.5">
             <div class="font-medium">{{ r.campaign_name }}</div>
@@ -131,17 +131,30 @@ async function setMode(campaignId, brand, mode, selectEl) {
   }
 }
 
+var statusFilter = ''; // var, not let: this script re-runs on every soft-nav
+
+function filterByStatus(statuses, tileEl) {
+  statusFilter = statuses;
+  document.querySelectorAll('#statusTiles [data-statuses]').forEach(t => {
+    t.style.boxShadow = (t === tileEl) ? '0 0 0 2px var(--brand)' : '';
+  });
+  filterCampaigns();
+}
+
 function filterCampaigns() {
   const q = document.getElementById('campaignSearch').value.trim().toLowerCase();
+  const statuses = statusFilter ? statusFilter.split(',') : null;
   const rows = document.querySelectorAll('#campaignsTable tbody tr[data-search]');
   let shown = 0;
   rows.forEach(row => {
-    const match = !q || row.dataset.search.includes(q);
+    const matchQ = !q || row.dataset.search.includes(q);
+    const matchStatus = !statuses || statuses.includes(row.dataset.status);
+    const match = matchQ && matchStatus;
     row.classList.toggle('hidden', !match);
     if (match) shown++;
   });
   const countEl = document.getElementById('campaignSearchCount');
-  countEl.textContent = q ? `${shown} of ${rows.length} campaigns` : '';
+  countEl.textContent = (q || statusFilter) ? `${shown} of ${rows.length} campaigns` : '';
 }
 
 var currentCampaignId = null; // var, not let: this script re-runs on every soft-nav
