@@ -40,6 +40,13 @@ plainly instead of guessing why.
 user names one explicitly.
 - Today's date is {today}. Blinkit revises the last ~2 days of data as more conversions land, so \
 flag numbers from the last 2 days as provisional if it's relevant to the question.
+- There are two separate recommendation sources, in two separate tables: get_pending_actions_summary \
+covers the scheduled weekly/daily batch (the one that can actually reach a live bid via the \
+separate implement step); get_ondemand_suggestions covers On-Demand AI - suggestions generated \
+manually from that page, right now, for one campaign at a time. They never share rows. If asked \
+"did we generate/run/check anything for X" without the word "pending" or "scheduled", check \
+get_ondemand_suggestions too - don't assume nothing happened just because the scheduled summary \
+is quiet.
 """
 
 TOOLS = [
@@ -130,6 +137,25 @@ TOOLS = [
                 "brand": {"type": "string"},
                 "since_days": {"type": "integer", "description": "How far back to include, default 30"},
                 "verdict": {"type": "string", "description": "IMPROVED, WORSENED, or FLAT - optional filter"},
+            },
+            "required": ["brand"],
+        },
+    },
+    {
+        "name": "get_ondemand_suggestions",
+        "description": (
+            "On-Demand AI Suggestions: recommendations generated manually from that page, right "
+            "now, for one campaign at a time - a completely separate table from the scheduled "
+            "Pending Actions batch, never pushed to a live bid on its own. Returns counts by "
+            "action/status and recent rows with their explanations. Use for 'did we generate/run/"
+            "check anything on-demand for X', 'what did the on-demand tool say about this "
+            "campaign', or any question naming 'on-demand'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string"},
+                "search": {"type": "string", "description": "Campaign name substring to filter to, optional - not a numeric ID"},
             },
             "required": ["brand"],
         },
@@ -298,12 +324,56 @@ def _tool_recommendation_impact(brand, since_days=30, verdict=None):
     }
 
 
+def _tool_ondemand_suggestions(brand, search=None):
+    rows = queries.fetch_ondemand_actions(brand)
+    if search:
+        s = search.lower()
+        rows = [r for r in rows if s in (r["campaign_name"] or "").lower()]
+    if not rows:
+        return {"total": 0, "note": "no on-demand suggestions found for this brand/campaign name"}
+
+    from collections import Counter
+
+    action_counts = dict(Counter(r["action"] for r in rows))
+    status_counts = Counter()
+    for r in rows:
+        if r["override_action"]:
+            status_counts["overridden"] += 1
+        elif r["user_implemented"] == "true":
+            status_counts["accepted"] += 1
+        elif r["user_implemented"] == "false":
+            status_counts["rejected"] += 1
+        else:
+            status_counts["undecided"] += 1
+
+    samples = [
+        {
+            "requested_at": r["requested_at"],
+            "campaign": r["campaign_name"],
+            "campaign_id": r["campaign_id"],
+            "keyword": r["targeting"],
+            "action": r["action"],
+            "confidence": r["confidence"],
+            "explanation": (r["explanation"] or "")[:400],
+        }
+        for r in rows[:8]
+    ]
+    return {
+        "total": len(rows),
+        "by_action": action_counts,
+        "by_status": dict(status_counts),
+        "most_recent_requested_at": rows[0]["requested_at"],
+        "sample_rows": samples,
+    }
+
+
 TOOL_FUNCTIONS = {
     "get_channel_performance": _tool_channel_performance,
     "get_before_after_keywords": _tool_before_after_keywords,
     "get_pending_actions_summary": _tool_pending_actions_summary,
     "get_campaign_status": _tool_campaign_status,
     "get_recommendation_impact": _tool_recommendation_impact,
+    "get_ondemand_suggestions": _tool_ondemand_suggestions,
 }
 
 
