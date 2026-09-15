@@ -1,5 +1,6 @@
 .claude/
 *.txt
+!webapp/requirements.txt
 __pycache__/
 .ipynb_checkpoints/
 webapp/.env
