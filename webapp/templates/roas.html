@@ -24,6 +24,13 @@
       <p class="text-sm mt-1 max-w-2xl" style="color:#9fb3d1">
         The whole channel's actual spend and sales, not just the keywords the AI touched. Pick the date a change went live, and how many days either side to compare.
       </p>
+      {% if channel.decisions_on_cutover == 0 %}
+      <div class="mt-3 max-w-2xl text-xs rounded-lg px-3 py-2" style="background:rgba(240,180,60,.15); color:#f5c975; border:1px solid rgba(240,180,60,.3);">
+        <strong>Heads up:</strong> nobody accepted or overridden anything on {{ channel.cutover_date }} for {{ brand }} —
+        every recommendation from that date is still undecided. The before/after split below reflects the channel's
+        organic movement around that date, not an AI-driven change.
+      </div>
+      {% endif %}
     </div>
   </div>
 

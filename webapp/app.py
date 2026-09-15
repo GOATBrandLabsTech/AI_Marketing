@@ -187,6 +187,7 @@ def roas():
             "window_days": window_days,
             "granularity": granularity,
             "scoped_to_showcase": bool(campaign_ids),
+            "decisions_on_cutover": queries.count_decisions_on_date(brand, cutover_date),
         }
 
     return render_template(

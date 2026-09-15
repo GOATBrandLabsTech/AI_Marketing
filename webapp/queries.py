@@ -655,6 +655,21 @@ def fetch_latest_action_date(brand):
         return row["d"] if row else None
 
 
+def count_decisions_on_date(brand, action_date):
+    """How many rows on this action_date were actually accepted or
+    overridden - used to warn on ROAS Impact when a before/after split is
+    drawn at a date where nothing was actually implemented, so organic
+    channel movement doesn't get misread as the AI's impact."""
+    with get_cursor() as cur:
+        cur.execute(
+            'SELECT COUNT(*) AS cnt FROM voylla."Blinkit_actions_llm" '
+            'WHERE "Brand" = %(brand)s AND action_date = %(action_date)s '
+            "AND user_implemented IS NOT NULL",
+            {"brand": brand, "action_date": str(action_date)},
+        )
+        return cur.fetchone()["cnt"]
+
+
 def fetch_pending_actions(brand, action_date):
     with get_cursor() as cur:
         cur.execute(
