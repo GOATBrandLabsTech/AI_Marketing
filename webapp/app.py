@@ -326,6 +326,15 @@ def api_accept_action(unique_key):
     return jsonify({"ok": True})
 
 
+@app.route("/api/actions/bulk_accept", methods=["POST"])
+@login_required
+def api_bulk_accept_actions():
+    payload = request.get_json(force=True) or {}
+    unique_keys = payload.get("unique_keys") or []
+    count = queries.bulk_accept_actions(unique_keys, payload.get("brand", current_brand()))
+    return jsonify({"ok": True, "count": count})
+
+
 @app.route("/api/actions/<unique_key>/override", methods=["POST"])
 @login_required
 def api_override_action(unique_key):

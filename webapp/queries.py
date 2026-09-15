@@ -687,6 +687,21 @@ def accept_action(unique_key, brand, accept, cpm_llm_override, note):
         return cur.rowcount
 
 
+def bulk_accept_actions(unique_keys, brand):
+    """Accept-as-is for many rows at once (Pending Actions "select all")."""
+    if not unique_keys:
+        return 0
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            'UPDATE voylla."Blinkit_actions_llm" '
+            "SET user_implemented = 'true', "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = ANY(%(unique_keys)s) AND "Brand" = %(brand)s',
+            {"unique_keys": list(unique_keys), "brand": brand},
+        )
+        return cur.rowcount
+
+
 def override_action(unique_key, brand, override_action_value, cpm_change_user, note):
     """Mirrors the marketing app's Action_Override Submit OnSelect Patch()."""
     with get_cursor(commit=True) as cur:

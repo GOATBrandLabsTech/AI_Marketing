@@ -28,3 +28,9 @@ CREATE TABLE IF NOT EXISTS voylla.campaign_autonomy_mode (
     set_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     PRIMARY KEY (campaign_id, brand)
 );
+
+-- One additive column on the existing Blinkit_actions_llm table (everything
+-- above is new tables only). Needed so a row that Auto Mode pushed with no
+-- human review can be told apart from one a person actually accepted -
+-- nullable, defaults to FALSE, touches nothing else about that table.
+ALTER TABLE voylla."Blinkit_actions_llm" ADD COLUMN IF NOT EXISTS is_auto_applied BOOLEAN DEFAULT FALSE;
