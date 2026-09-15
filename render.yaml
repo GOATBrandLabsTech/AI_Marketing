@@ -2,7 +2,7 @@ services:
   - type: web
     name: blinkit-control
     runtime: python
-    plan: starter
+    plan: free
     branch: claude/blinkit-agent-roas-analysis-c4de2b
     rootDir: webapp
     buildCommand: pip install -r requirements.txt
