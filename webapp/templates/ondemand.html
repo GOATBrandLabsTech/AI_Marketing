@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}On-Demand AI - Blinkit Control{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-7">
+  <div>
+    <h1 class="page-title text-2xl font-bold text-ink">On-Demand AI Suggestions</h1>
+    {% if chooser %}
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Pick a brand to generate or review on-demand suggestions.</p>
+    {% else %}
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">
+      Ask the AI to re-evaluate one campaign right now, instead of waiting for the scheduled run.
+      Writes to its own table — never touches the scheduled Pending Actions data, and never pushes a live bid on its own.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+{% if chooser %}
+<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  {% for c in chooser %}
+  <a href="{{ url_for('ondemand', brand=c.brand) }}" data-soft class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
+    <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">{{ c.brand }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+
+<div class="card p-5 mb-6">
+  <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Generate a fresh suggestion</div>
+  <div class="flex flex-wrap items-end gap-3">
+    <div class="flex-1 min-w-[240px]">
+      <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Campaign <span class="font-normal" style="color:var(--ink-muted)">(type to search)</span></label>
+      <input id="genCampaignSearch" list="campaignOptions" autocomplete="off" placeholder="Start typing a campaign name or ID&hellip;"
+             oninput="syncCampaignId()" class="w-full rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+      <input type="hidden" id="genCampaignId">
+      <datalist id="campaignOptions">
+        {% for label in campaign_label_map %}
+        <option value="{{ label }}"></option>
+        {% endfor %}
+      </datalist>
+    </div>
+    <button id="genBtn" onclick="generateNow()" class="text-white text-sm font-semibold rounded-lg px-4 py-2.5 transition" style="background:var(--brand);"
+            onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">
+      Generate now
+    </button>
+  </div>
+  <div id="genStatus" class="text-xs mt-3" style="color:var(--ink-muted)"></div>
+</div>
+
+<div class="mb-4 flex items-center gap-3">
+  {% if campaign_filter %}
+  <a href="{{ url_for('ondemand', brand=brand) }}" data-soft class="text-xs font-semibold px-3 py-2 rounded-lg border transition" style="border-color:var(--ring); color:var(--ink-2)">&larr; All campaigns</a>
+  <span class="text-sm" style="color:var(--ink-2)">Filtered to campaign #{{ campaign_filter }}</span>
+  {% else %}
+  <span class="text-sm" style="color:var(--ink-muted)">{{ rows|length }} recent suggestion(s), all campaigns</span>
+  {% endif %}
+</div>
+
+<div class="card overflow-hidden">
+  <div class="overflow-x-auto max-h-[75vh]">
+    <table class="data w-full text-sm">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-4 py-3">Requested</th>
+          <th class="px-4 py-3">Campaign</th>
+          <th class="px-4 py-3">Keyword</th>
+          <th class="px-4 py-3">AI action</th>
+          <th class="px-4 py-3 text-right">CPM</th>
+          <th class="px-4 py-3 text-right">Confidence</th>
+          <th class="px-4 py-3">Status</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="border-b" style="border-color:var(--grid)">
+          <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.requested_at }}</td>
+          <td class="px-4 py-2.5 font-medium">{{ r.campaign_name }}</td>
+          <td class="px-4 py-2.5">{{ r.targeting }}</td>
+          <td class="px-4 py-2.5 whitespace-nowrap">
+            {{ r.action }}
+            {% if r.rule_action and r.rule_action != '' and r.rule_action != r.action %}
+              <span class="badge" style="background:#fef3e2;color:#8a5a00;" title="Rule engine wanted {{ r.rule_action }}"><span class="dot" style="background:var(--warning)"></span>diverged</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right whitespace-nowrap">{{ r.current_cpm }}{% if r.bid_change %} <span style="color:var(--ink-muted)">(&Delta;{{ r.bid_change }})</span>{% endif %}</td>
+          <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.confidence if r.confidence is not none else '-' }}</td>
+          <td class="px-4 py-2.5">
+            {% if r.override_action %}<span class="badge" style="background:#efeafb;color:#5b3fb8;"><span class="dot" style="background:#4a3aa7"></span>override: {{ r.override_action }}</span>
+            {% elif r.user_implemented == 'true' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>accepted</span>
+            {% elif r.user_implemented == 'false' %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>rejected</span>
+            {% else %}<span class="badge" style="background:#f2f2f0;color:var(--ink-muted);"><span class="dot" style="background:#d5d4cf"></span>undecided</span>{% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right">
+            <button onclick="toggleRow('row-{{ r.unique_key }}')" class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)" onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'">Review</button>
+          </td>
+        </tr>
+        <tr id="row-{{ r.unique_key }}" class="hidden" style="background:var(--plane)">
+          <td colspan="8" class="px-5 py-5">
+            <div class="mb-4 max-w-3xl space-y-2">
+              {% for step in r.explanation|steps %}
+              <div class="text-xs leading-relaxed pl-3 py-0.5" style="color:var(--ink-2); border-left:2px solid var(--ring)">{{ step }}</div>
+              {% else %}
+              <div class="text-xs" style="color:var(--ink-muted)">No explanation recorded.</div>
+              {% endfor %}
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="card p-4">
+                <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Accept AI recommendation</div>
+                <label class="flex items-center gap-2 text-sm mb-3">
+                  <input type="checkbox" id="accept-chk-{{ r.unique_key }}" {{ 'checked' if r.user_implemented == 'true' else '' }} class="w-4 h-4 rounded" style="accent-color:var(--brand)">
+                  Mark accepted (does not push a live bid)
+                </label>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">CPM override %</label>
+                <input type="number" step="0.1" id="accept-cpm-{{ r.unique_key }}" value="{{ r.cpm_llm_override if r.cpm_llm_override is not none else '' }}"
+                       class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Note</label>
+                <textarea id="accept-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">{{ r.override_note or '' }}</textarea>
+                <button class="text-white text-xs font-semibold rounded-lg px-3.5 py-2 transition" style="background:var(--brand);"
+                        onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'"
+                        onclick="submitAccept('{{ r.unique_key }}')">Save</button>
+              </div>
+              <div class="card p-4">
+                <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Override action</div>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">New action</label>
+                <select id="override-action-{{ r.unique_key }}" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                  {% for opt in action_options %}
+                  <option value="{{ opt }}" {{ 'selected' if opt == r.override_action else '' }}>{{ opt }}</option>
+                  {% endfor %}
+                </select>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">CPM change %</label>
+                <input type="number" step="0.1" id="override-cpm-{{ r.unique_key }}" value="{{ r.cpm_change_user if r.cpm_change_user is not none else '' }}"
+                       class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Note</label>
+                <textarea id="override-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">{{ r.override_note or '' }}</textarea>
+                <button class="text-white text-xs font-semibold rounded-lg px-3.5 py-2 transition" style="background:#1c1d20;"
+                        onmouseover="this.style.background='#000'" onmouseout="this.style.background='#1c1d20'"
+                        onclick="submitOverride('{{ r.unique_key }}')">Save override</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No on-demand suggestions yet — generate one above.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+var BRAND = {{ brand|tojson }}; // var, not const: this script re-runs on every soft-nav
+
+var CAMPAIGN_ID_BY_LABEL = {{ (campaign_label_map or {})|tojson }};
+
+function syncCampaignId() {
+  const label = document.getElementById('genCampaignSearch').value.trim();
+  document.getElementById('genCampaignId').value = CAMPAIGN_ID_BY_LABEL[label] || '';
+}
+
+async function generateNow() {
+  const campaignId = document.getElementById('genCampaignId').value;
+  const statusEl = document.getElementById('genStatus');
+  const btn = document.getElementById('genBtn');
+  if (!campaignId) {
+    statusEl.textContent = 'Pick a campaign first.';
+    statusEl.style.color = 'var(--critical)';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Generating… (can take up to a minute)';
+  statusEl.style.color = 'var(--ink-muted)';
+  statusEl.textContent = 'Calling the rule engine + LLM for this campaign…';
+  try {
+    const res = await fetch('/api/ondemand/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brand: BRAND, campaign_id: campaignId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      statusEl.style.color = 'var(--good)';
+      statusEl.textContent = `Generated ${data.count} suggestion(s). Reloading…`;
+      setTimeout(() => location.reload(), 900);
+    } else {
+      statusEl.style.color = 'var(--critical)';
+      statusEl.textContent = data.error || 'Generation failed.';
+      btn.disabled = false;
+      btn.textContent = 'Generate now';
+    }
+  } catch (e) {
+    statusEl.style.color = 'var(--critical)';
+    statusEl.textContent = 'Request failed: ' + e;
+    btn.disabled = false;
+    btn.textContent = 'Generate now';
+  }
+}
+
+async function submitAccept(key) {
+  const accept = document.getElementById('accept-chk-' + key).checked;
+  const cpm = document.getElementById('accept-cpm-' + key).value;
+  const note = document.getElementById('accept-note-' + key).value;
+  await postJSON(`/api/ondemand/${encodeURIComponent(key)}/accept`, {
+    brand: BRAND, accept, cpm_llm_override: cpm === '' ? null : Number(cpm), note,
+  });
+  toast('Saved', true);
+  setTimeout(() => location.reload(), 600);
+}
+
+async function submitOverride(key) {
+  const action = document.getElementById('override-action-' + key).value;
+  const cpm = document.getElementById('override-cpm-' + key).value;
+  const note = document.getElementById('override-note-' + key).value;
+  await postJSON(`/api/ondemand/${encodeURIComponent(key)}/override`, {
+    brand: BRAND, override_action: action, cpm_change_user: cpm === '' ? null : Number(cpm), note,
+  });
+  toast('Override saved', true);
+  setTimeout(() => location.reload(), 600);
+}
+</script>
+{% endblock %}

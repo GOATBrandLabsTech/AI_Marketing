@@ -724,6 +724,67 @@ def override_action(unique_key, brand, override_action_value, cpm_change_user, n
         return cur.rowcount
 
 
+def fetch_ondemand_actions(brand, campaign_id=None, limit=300):
+    """Rows from the on-demand replica table - never Blinkit_actions_llm."""
+    with get_cursor() as cur:
+        if campaign_id:
+            cur.execute(
+                'SELECT * FROM voylla.blinkit_ondemand_actions '
+                'WHERE "Brand" = %(brand)s AND campaign_id = %(campaign_id)s '
+                "ORDER BY requested_at DESC, unique_key LIMIT %(limit)s",
+                {"brand": brand, "campaign_id": str(campaign_id), "limit": limit},
+            )
+        else:
+            cur.execute(
+                'SELECT * FROM voylla.blinkit_ondemand_actions '
+                'WHERE "Brand" = %(brand)s '
+                "ORDER BY requested_at DESC, unique_key LIMIT %(limit)s",
+                {"brand": brand, "limit": limit},
+            )
+        return cur.fetchall()
+
+
+def accept_ondemand_action(unique_key, brand, accept, cpm_llm_override, note):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.blinkit_ondemand_actions "
+            "SET user_implemented = %(accept)s, "
+            "    cpm_llm_override = %(cpm)s, "
+            "    override_note = %(note)s, "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = %(unique_key)s AND "Brand" = %(brand)s',
+            {
+                "accept": "true" if accept else "false",
+                "cpm": cpm_llm_override,
+                "note": note,
+                "unique_key": unique_key,
+                "brand": brand,
+            },
+        )
+        return cur.rowcount
+
+
+def override_ondemand_action(unique_key, brand, override_action_value, cpm_change_user, note):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.blinkit_ondemand_actions "
+            "SET user_implemented = 'false', "
+            "    override_action = %(override_action)s, "
+            "    cpm_change_user = %(cpm)s, "
+            "    override_note = %(note)s, "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = %(unique_key)s AND "Brand" = %(brand)s',
+            {
+                "override_action": override_action_value,
+                "cpm": cpm_change_user,
+                "note": note,
+                "unique_key": unique_key,
+                "brand": brand,
+            },
+        )
+        return cur.rowcount
+
+
 def fetch_schedule_entries(campaign_id):
     with get_cursor() as cur:
         cur.execute(

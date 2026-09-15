@@ -349,6 +349,75 @@ def api_override_action(unique_key):
     return jsonify({"ok": True})
 
 
+@app.route("/ondemand")
+@login_required
+def ondemand():
+    brand = current_brand()
+    session["brand"] = brand
+
+    if brand == queries.ALL_BRANDS:
+        return render_template("ondemand.html", chooser=queries.fetch_brands(), active="ondemand")
+
+    campaign_filter = request.args.get("campaign_id") or None
+    campaigns = queries.fetch_campaign_status(brand)
+    rows = queries.fetch_ondemand_actions(brand, campaign_id=campaign_filter)
+    campaign_label_map = {
+        f"{c['campaign_name']} (#{c['campaign_id']})": str(c["campaign_id"]) for c in campaigns
+    }
+    return render_template(
+        "ondemand.html",
+        campaigns=campaigns,
+        campaign_label_map=campaign_label_map,
+        rows=rows,
+        campaign_filter=campaign_filter,
+        action_options=queries.ACTION_OPTIONS,
+        active="ondemand",
+    )
+
+
+@app.route("/api/ondemand/generate", methods=["POST"])
+@login_required
+def api_ondemand_generate():
+    payload = request.get_json(force=True) or {}
+    campaign_id = payload.get("campaign_id")
+    brand = payload.get("brand", current_brand())
+    if not campaign_id:
+        return jsonify({"ok": False, "error": "campaign_id is required"}), 400
+
+    import ondemand_engine
+
+    result = ondemand_engine.generate_ondemand_suggestions(brand, campaign_id, requested_by="dashboard")
+    return jsonify(result), (200 if result["ok"] else 500)
+
+
+@app.route("/api/ondemand/<unique_key>/accept", methods=["POST"])
+@login_required
+def api_ondemand_accept(unique_key):
+    payload = request.get_json(force=True) or {}
+    queries.accept_ondemand_action(
+        unique_key,
+        payload.get("brand", current_brand()),
+        bool(payload.get("accept")),
+        payload.get("cpm_llm_override"),
+        payload.get("note"),
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/ondemand/<unique_key>/override", methods=["POST"])
+@login_required
+def api_ondemand_override(unique_key):
+    payload = request.get_json(force=True) or {}
+    queries.override_ondemand_action(
+        unique_key,
+        payload.get("brand", current_brand()),
+        payload.get("override_action"),
+        payload.get("cpm_change_user"),
+        payload.get("note"),
+    )
+    return jsonify({"ok": True})
+
+
 @app.route("/campaigns")
 @login_required
 def campaigns():

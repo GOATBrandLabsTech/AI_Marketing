@@ -52,6 +52,19 @@ def get_anthropic_config():
     return {"model": lines[0], "api_key": lines[1]}
 
 
+def get_engine():
+    """SQLAlchemy engine for pandas-based aggregation (ondemand_engine.py) -
+    same connection details as get_conn(), different driver interface."""
+    from sqlalchemy import create_engine
+
+    cfg = get_db_config()
+    url = (
+        f"postgresql+psycopg2://{cfg['user']}:{cfg['password']}"
+        f"@{cfg['host']}:{cfg['port']}/{cfg['dbname']}"
+    )
+    return create_engine(url)
+
+
 @contextmanager
 def get_conn():
     cfg = get_db_config()
