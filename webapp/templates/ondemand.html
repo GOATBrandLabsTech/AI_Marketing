@@ -29,15 +29,13 @@
   <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Generate a fresh suggestion</div>
   <div class="flex flex-wrap items-end gap-3">
     <div class="flex-1 min-w-[240px]">
-      <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Campaign <span class="font-normal" style="color:var(--ink-muted)">(type to search)</span></label>
-      <input id="genCampaignSearch" list="campaignOptions" autocomplete="off" placeholder="Start typing a campaign name or ID&hellip;"
-             oninput="syncCampaignId()" class="w-full rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
-      <input type="hidden" id="genCampaignId">
-      <datalist id="campaignOptions">
-        {% for label in campaign_label_map %}
-        <option value="{{ label }}"></option>
+      <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Campaign <span class="font-normal" style="color:var(--ink-muted)">(click to pick, or type to jump)</span></label>
+      <select id="genCampaignId" class="w-full rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+        <option value="">Select a campaign&hellip;</option>
+        {% for label, cid in campaign_label_map.items() %}
+        <option value="{{ cid }}">{{ label }}</option>
         {% endfor %}
-      </datalist>
+      </select>
     </div>
     <button id="genBtn" onclick="generateNow()" class="text-white text-sm font-semibold rounded-lg px-4 py-2.5 transition" style="background:var(--brand);"
             onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">
@@ -152,13 +150,6 @@
 {% block scripts %}
 <script>
 var BRAND = {{ brand|tojson }}; // var, not const: this script re-runs on every soft-nav
-
-var CAMPAIGN_ID_BY_LABEL = {{ (campaign_label_map or {})|tojson }};
-
-function syncCampaignId() {
-  const label = document.getElementById('genCampaignSearch').value.trim();
-  document.getElementById('genCampaignId').value = CAMPAIGN_ID_BY_LABEL[label] || '';
-}
 
 async function generateNow() {
   const campaignId = document.getElementById('genCampaignId').value;
