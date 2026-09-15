@@ -1,6 +1,7 @@
 Flask>=3.0
-psycopg2>=2.9
+psycopg2-binary>=2.9
 python-dotenv>=1.0
 anthropic>=0.94
 pandas>=2.0
 SQLAlchemy>=2.0
+gunicorn>=21.2
