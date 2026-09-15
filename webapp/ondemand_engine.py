@@ -1913,6 +1913,117 @@ def _fetch_ondemand_history(engine, brand, campaign_id):
     """, engine)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# OUTCOME FEEDBACK  (the memory/learning loop - new, not from the notebook)
+# ══════════════════════════════════════════════════════════════════════════════
+# Before generating a fresh suggestion, look back at the last decision THIS
+# system actually got accepted for this keyword, and grade it: did ROAS
+# improve or not after that change went live? That verdict gets folded into
+# the next LLM call's history section, so the model can see not just "what
+# did we decide" but "and did it work" - reusing the exact same
+# spend-weighted MET/MISSED logic as the dashboard's Before/After page
+# (queries.EXPECTATION_TOLERANCE / _expectation_verdict), so a "good call"
+# here means the same thing it means everywhere else in this project.
+
+OUTCOME_GRADE_WAIT_DAYS = 7  # a bid change needs at least this long before its ROAS is trustworthy
+
+
+def compute_outcome_feedback(engine, brand, campaign_id, targeting_key, wait_days=OUTCOME_GRADE_WAIT_DAYS):
+    """
+    Returns a short, human-readable line grading the last ACCEPTED on-demand
+    decision for this keyword, or None if there is nothing to grade yet
+    (never accepted, or too recent to judge). Meant to be appended to
+    previous_summary before it goes into the prompt.
+    """
+    from queries import _expectation_verdict
+
+    last = pd.read_sql(
+        """
+        SELECT action, implementation_date
+        FROM voylla.blinkit_ondemand_actions
+        WHERE "Brand" = %(brand)s AND campaign_id = %(campaign_id)s
+          AND targeting = %(targeting)s AND user_implemented = 'true'
+          AND implementation_date IS NOT NULL
+        ORDER BY implementation_date DESC
+        LIMIT 1
+        """,
+        engine,
+        params={"brand": brand, "campaign_id": str(campaign_id), "targeting": targeting_key},
+    )
+    if last.empty:
+        return None
+
+    action    = str(last.iloc[0]["action"] or "").upper()
+    impl_date = last.iloc[0]["implementation_date"]
+    days_since = (datetime.now().date() - impl_date).days
+    if days_since < wait_days:
+        return (f"Accepted {action} on {impl_date} - only {days_since}d ago, "
+                f"too recent to grade (need {wait_days}d).")
+
+    # Same-shape before/after: `wait_days` on each side of the implementation date,
+    # scoped to this one keyword. Targeting join deliberately case/underscore
+    # normalised - Blinkit_Ads_Report uses spaces and original case, this
+    # table stores lower_snake_case.
+    window = pd.read_sql(
+        """
+        SELECT
+            (TO_TIMESTAMP(a."Date",'YYYY-MM-DD HH24:MI:SS')::date < %(impl_date)s) AS is_before,
+            SUM(a."Estimated Budget Consumed") AS spend,
+            SUM(a."Direct Sales" + a."Indirect Sales") AS sales
+        FROM voylla."Blinkit_Ads_Report" a
+        WHERE a."Brand" = %(brand)s
+          AND a."Campaign ID"::TEXT = %(campaign_id)s
+          AND LOWER(REPLACE(a."Targeting Value", ' ', '_')) = %(targeting)s
+          AND TO_TIMESTAMP(a."Date",'YYYY-MM-DD HH24:MI:SS')::date
+              BETWEEN %(impl_date)s - INTERVAL '%(wait_days)s day'
+                  AND %(impl_date)s + INTERVAL '%(wait_days)s day'
+        GROUP BY is_before
+        """,
+        engine,
+        params={
+            "brand": brand, "campaign_id": str(campaign_id), "targeting": targeting_key,
+            "impl_date": impl_date, "wait_days": wait_days,
+        },
+    )
+    spend_before = float(window.loc[window["is_before"] == True, "spend"].sum())
+    sales_before = float(window.loc[window["is_before"] == True, "sales"].sum())
+    spend_after  = float(window.loc[window["is_before"] == False, "spend"].sum())
+    sales_after  = float(window.loc[window["is_before"] == False, "sales"].sum())
+
+    roas_before = round(sales_before / spend_before, 2) if spend_before > 0 else None
+    roas_after  = round(sales_after / spend_after, 2) if spend_after > 0 else None
+
+    if action == "PAUSE" and spend_after < max(0.05 * spend_before, 20):
+        naive_verdict = "PAUSED"
+    elif roas_before is None:
+        naive_verdict = "NEW"
+    else:
+        naive_verdict = "IMPROVED" if (roas_after or 0) >= roas_before else "WORSENED"
+
+    verdict, reason = _expectation_verdict(action, roas_before, roas_after, naive_verdict)
+
+    if verdict == "MET" and naive_verdict == "PAUSED":
+        return f"Last accepted decision ({impl_date}): {action}. Outcome: spend stopped as intended - MET."
+    if roas_before is None or roas_after is None:
+        return f"Last accepted decision ({impl_date}): {action}. Outcome: not enough spend on one side to grade ({reason})."
+    return (f"Last accepted decision ({impl_date}): {action}. "
+            f"ROAS {roas_before} -> {roas_after}. Verdict: {verdict} ({reason}).")
+
+
+def fetch_active_campaign_ids(engine, brand):
+    """Campaigns with any spend in the last 7 days - the daily run's scope."""
+    df = pd.read_sql(
+        """
+        SELECT DISTINCT "Campaign ID"::TEXT AS campaign_id
+        FROM voylla."Blinkit_Ads_Report"
+        WHERE "Brand" = %(brand)s
+          AND TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS') >= CURRENT_DATE - INTERVAL '7 days'
+        """,
+        engine, params={"brand": brand},
+    )
+    return df["campaign_id"].tolist()
+
+
 def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
     """
     One synchronous call: fetch this campaign's rolling window data, run the
@@ -1943,7 +2054,10 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
         row["campaign_name"] = campaign_name
         targeting_key = str(row.get("targeting", "")).strip().lower().replace(" ", "_")
         prev = build_previous_context(history_df, campaign_id, targeting_key)
-        row["previous_summary"] = prev["previous_summary"]
+        outcome = compute_outcome_feedback(engine, brand, campaign_id, targeting_key)
+        row["previous_summary"] = (
+            prev["previous_summary"] + (f" | OUTCOME: {outcome}" if outcome else "")
+        )
         row["previous_history"] = prev["previous_history"]
         inject_python_flags(row)
 
@@ -2008,6 +2122,14 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
            "previous_history" -> use this list for Step 5 decision-making (newest first).
         -> Do NOT repeat an action flagged with LOOP in previous_summary.
         -> Do NOT cross-reference history between keywords.
+        -> If previous_summary contains "| OUTCOME: ...", that is a grade of whether your
+           LAST accepted decision for this exact keyword actually worked (MET/MISSED/PAUSED,
+           with the real before/after ROAS). Weigh it like a second opinion from a colleague
+           checking your last call: if it says MISSED, treat that as real evidence the last
+           move was wrong for this keyword and be more willing to reverse or try something
+           different this cycle. If it says MET, that's confirmation the reasoning that led
+           to it was sound — lean on the same logic again unless the numbers have moved. If
+           it's "too recent to grade", ignore it and decide on the current data alone.
 
         CURRENT DATA (7-day aggregated with 15-day and 30-day ROAS and spend):
         {json.dumps(clean_nan(data_for_llm))}
@@ -2107,3 +2229,50 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
 
     rows = save_ondemand_action(engine, suggestion_response, brand, requested_by=requested_by)
     return {"ok": True, "count": len(rows), "rows": rows, "error": None}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DAILY ORCHESTRATOR  (new - not from the notebook)
+# ══════════════════════════════════════════════════════════════════════════════
+# Runs generate_ondemand_suggestions for every active campaign in a brand, one
+# at a time. This is the function the daily scheduled notebook
+# (Blinkit_Ondemand_Daily_Suggestions.ipynb) calls - the manual "Generate now"
+# button and the daily run share this exact same per-campaign logic, so a
+# suggestion looks and behaves identically whichever way it was triggered.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_daily_suggestions_for_brand(brand, campaign_ids=None, requested_by="daily_scheduled"):
+    """
+    Loops generate_ondemand_suggestions() over every active campaign (7-day
+    spend) for a brand, or a caller-supplied list. Never raises - a failed
+    campaign is recorded and the loop continues, so one bad campaign can't
+    take down the whole daily run.
+
+    Returns {"brand", "campaigns_run", "total_suggestions", "failures": [...]}.
+    """
+    from db import get_engine
+
+    engine = get_engine()
+    ids = campaign_ids or fetch_active_campaign_ids(engine, brand)
+
+    total = 0
+    failures = []
+    for campaign_id in ids:
+        try:
+            result = generate_ondemand_suggestions(brand, campaign_id, requested_by=requested_by)
+            if result["ok"]:
+                total += result["count"]
+                print(f"[daily] {brand} #{campaign_id}: {result['count']} suggestion(s)")
+            else:
+                failures.append({"campaign_id": campaign_id, "error": result["error"]})
+                print(f"[daily] {brand} #{campaign_id}: FAILED - {result['error']}")
+        except Exception as e:
+            failures.append({"campaign_id": campaign_id, "error": str(e)})
+            print(f"[daily] {brand} #{campaign_id}: EXCEPTION - {e}")
+
+    return {
+        "brand": brand,
+        "campaigns_run": len(ids),
+        "total_suggestions": total,
+        "failures": failures,
+    }

@@ -73,3 +73,11 @@ CREATE INDEX IF NOT EXISTS idx_ondemand_brand_date
     ON voylla.blinkit_ondemand_actions("Brand", action_date);
 CREATE INDEX IF NOT EXISTS idx_ondemand_campaign
     ON voylla.blinkit_ondemand_actions(campaign_id, targeting);
+
+-- Push tracking for the independent implement script (Blinkit_Ondemand_Bid_Push.ipynb).
+-- Separate from implementation_date (which just means "a human decided") -
+-- these three say whether THIS system's own push script has actually sent
+-- the change to Blinkit yet.
+ALTER TABLE voylla.blinkit_ondemand_actions ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMP;
+ALTER TABLE voylla.blinkit_ondemand_actions ADD COLUMN IF NOT EXISTS push_status TEXT;
+ALTER TABLE voylla.blinkit_ondemand_actions ADD COLUMN IF NOT EXISTS push_note TEXT;
