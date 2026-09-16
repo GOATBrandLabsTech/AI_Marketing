@@ -72,7 +72,7 @@
       <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.before.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.before.sales) }} sales &middot; {{ channel.before_after.before.days }} days</div>
     </div>
     <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
-      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">After &middot; since {{ channel.cutover_date }}</div>
+      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">{{ 'After' if channel.decisions_on_cutover else 'Since (nothing implemented)' }} &middot; {{ channel.cutover_date }}</div>
       <div class="font-display text-2xl font-bold" style="color: {{ ('#3ddc6a' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas > channel.before_after.before.roas else '#ff8a80' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas < channel.before_after.before.roas else '#fff') if channel.decisions_on_cutover else '#fff' }}">
         {{ channel.before_after.after.roas if channel.before_after.after.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span>
       </div>
