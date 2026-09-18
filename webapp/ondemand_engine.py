@@ -1337,13 +1337,17 @@ def fix_explanation_sections(explanation: str) -> str:
 SPEND_THRESHOLD = 500  # same cutoff as the scheduled pipeline
 
 
-def _build_clean_rows(action_obj, brand):
+def _build_clean_rows(action_obj, brand, tolerance_pct=20):
     """
     Same row-cleaning / safety-guard logic as the scheduled pipeline's
     save_llm_action (zombie override, floor clamp, position-1 block, PAUSE
     validity guards, quick_action, explanation builder) - but returns the
     cleaned rows instead of writing them, so the caller can pick the
     destination table.
+
+    `tolerance_pct` is the hard authorized ceiling on any single CPM move
+    (set per-campaign, default 20%) - the rule engine already targets
+    ~10-12%, so this is a backstop, not the normal step size.
     """
     if not action_obj:
         return []
@@ -1509,6 +1513,24 @@ def _build_clean_rows(action_obj, brand):
                 except (TypeError, ValueError):
                     pass
 
+            # Authorized-tolerance ceiling: no single move exceeds tolerance_pct
+            # of current_cpm, regardless of what the rule engine/LLM proposed.
+            if action in ("DECREASE_CPM", "INCREASE_CPM"):
+                try:
+                    _cpm_tol = float(current_cpm) if current_cpm is not None else None
+                    if _cpm_tol and _cpm_tol > 0:
+                        _ceiling = round(_cpm_tol * (float(tolerance_pct) / 100.0))
+                        if cpm_change > _ceiling:
+                            _expl_tol = a.get("explanation", "")
+                            _expl_tol += (f" | TOLERANCE CLAMP: {cpm_change} would exceed the authorized "
+                                          f"{tolerance_pct:.0f}% ceiling for this campaign; capped to {_ceiling}.")
+                            a["explanation"] = _expl_tol
+                            explanation = _expl_tol
+                            cpm_change      = _ceiling
+                            a["cpm_change"] = _ceiling
+                except (TypeError, ValueError):
+                    pass
+
             # Floor guard: DECREASE only if result stays at/above floor
             if action == "DECREASE_CPM":
                 try:
@@ -1648,10 +1670,10 @@ def _build_clean_rows(action_obj, brand):
     return clean_rows
 
 
-def save_ondemand_action(engine, action_obj, brand, requested_by=None):
+def save_ondemand_action(engine, action_obj, brand, requested_by=None, tolerance_pct=20):
     """Same safety-guard pipeline as the scheduled pipeline's save_llm_action,
     writing into voylla.blinkit_ondemand_actions instead of Blinkit_actions_llm."""
-    clean_rows = _build_clean_rows(action_obj, brand)
+    clean_rows = _build_clean_rows(action_obj, brand, tolerance_pct=tolerance_pct)
     if not clean_rows:
         return []
 
@@ -1676,8 +1698,44 @@ def save_ondemand_action(engine, action_obj, brand, requested_by=None):
         for row in clean_rows:
             conn.execute(insert_sql, {**row, "alternative_keywords": json.dumps(row["alternative_keywords"])})
 
-    print(f"[ondemand] inserted {len(clean_rows)} suggestion row(s) for campaign {clean_rows[0]['campaign_id']}")
+    accepted = _auto_accept_if_enabled(brand, clean_rows[0]["campaign_id"], clean_rows)
+    print(f"[ondemand] inserted {len(clean_rows)} suggestion row(s) for campaign {clean_rows[0]['campaign_id']}"
+          + (f" - auto-accepted {accepted} (autonomy mode 'auto')" if accepted else ""))
     return clean_rows
+
+
+AUTO_ACCEPT_ACTIONS = {"INCREASE_CPM", "DECREASE_CPM", "PAUSE"}
+AUTO_ACCEPT_HOLD_BACK_QUICK_ACTIONS = {"REVIEW"}
+
+
+def _auto_accept_if_enabled(brand, campaign_id, clean_rows):
+    """When this campaign is on-demand-managed AND its autonomy mode is
+    'auto', accept every actionable suggestion (INCREASE_CPM/DECREASE_CPM/
+    PAUSE) as-is - no human click - so the scheduled push notebook can pick
+    it up unattended. A row flagged REVIEW (LLM diverged from the rule
+    decision, confidence was defaulted, or the LLM skipped the keyword) is
+    held back even in auto mode - those still need a human look. ZOMBIE_FLAG
+    is deliberately never auto-accepted; it exists to park a keyword for
+    manual review, not to move a bid, so nothing is lost by leaving it
+    pending. Returns how many rows were auto-accepted."""
+    import queries
+
+    setting = queries.fetch_autonomy_setting(campaign_id, brand)
+    if setting["mode"] != "auto" or not setting["ondemand_managed"]:
+        return 0
+
+    accepted = 0
+    for row in clean_rows:
+        if row["action"] not in AUTO_ACCEPT_ACTIONS:
+            continue
+        if row["quick_action"] in AUTO_ACCEPT_HOLD_BACK_QUICK_ACTIONS:
+            continue
+        queries.accept_ondemand_action(
+            row["unique_key"], brand, True, None,
+            f"auto-accepted - autonomy mode 'auto', tolerance {float(setting['bid_tolerance_pct']):.0f}%",
+        )
+        accepted += 1
+    return accepted
 
 
 def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
@@ -2227,7 +2285,10 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
             bf["explanation"]   = "LLM -> no response for this keyword; the signed-off rule decision was applied unchanged."
             suggestion_response.append(bf)
 
-    rows = save_ondemand_action(engine, suggestion_response, brand, requested_by=requested_by)
+    import queries
+    tolerance_pct = float(queries.fetch_autonomy_setting(campaign_id, brand)["bid_tolerance_pct"])
+
+    rows = save_ondemand_action(engine, suggestion_response, brand, requested_by=requested_by, tolerance_pct=tolerance_pct)
     return {"ok": True, "count": len(rows), "rows": rows, "error": None}
 
 
@@ -2243,17 +2304,24 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
 
 def generate_daily_suggestions_for_brand(brand, campaign_ids=None, requested_by="daily_scheduled"):
     """
-    Loops generate_ondemand_suggestions() over every active campaign (7-day
-    spend) for a brand, or a caller-supplied list. Never raises - a failed
-    campaign is recorded and the loop continues, so one bad campaign can't
-    take down the whole daily run.
+    Loops generate_ondemand_suggestions() over every on-demand-managed
+    campaign for a brand (voylla.campaign_autonomy_mode.ondemand_managed =
+    true), or a caller-supplied list. Deliberately NOT "every active
+    campaign" - this pipeline only ever touches campaigns explicitly opted
+    in (see the Campaigns & Budget / On-Demand AI pages), so turning this on
+    can never silently start generating LLM suggestions for the whole
+    brand's catalog. Never raises - a failed campaign is recorded and the
+    loop continues, so one bad campaign can't take down the whole daily run.
 
     Returns {"brand", "campaigns_run", "total_suggestions", "failures": [...]}.
     """
     from db import get_engine
+    import queries
 
     engine = get_engine()
-    ids = campaign_ids or fetch_active_campaign_ids(engine, brand)
+    ids = campaign_ids or sorted(queries.fetch_ondemand_managed_ids(brand))
+    if not ids:
+        return {"brand": brand, "campaigns_run": 0, "total_suggestions": 0, "failures": []}
 
     total = 0
     failures = []

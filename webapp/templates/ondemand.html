@@ -25,6 +25,32 @@
 </div>
 {% else %}
 
+{% if automation %}
+<div class="card p-5 mb-6" style="border-color:{{ 'var(--good)' if automation.mode == 'auto' else 'var(--ring)' }}">
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">Full automation - {{ automation.campaign_name or ('#' ~ campaign_filter) }}</div>
+      {% if automation.mode == 'auto' %}
+      <p class="text-sm" style="color:var(--good)">
+        <strong>ON.</strong> This campaign is delinked from Blinkit_actions_llm - suggestions come only from this on-demand engine.
+        The daily run auto-accepts INCREASE_CPM / DECREASE_CPM / PAUSE (never a REVIEW-flagged row), capped to &plusmn;{{ automation.bid_tolerance_pct|int }}% per move, for the scheduled push script to send live.
+      </p>
+      {% elif automation.ondemand_managed %}
+      <p class="text-sm" style="color:var(--ink-2)">
+        Delinked from Blinkit_actions_llm - suggestions here are the only ones for this campaign. Autonomy mode is <strong>semi_auto</strong>: you still accept/override each row yourself below. Flip to Auto to remove that manual step.
+      </p>
+      {% else %}
+      <p class="text-sm" style="color:var(--ink-2)">Not yet on-demand-managed - turning this on delinks the campaign from Blinkit_actions_llm and, in Auto, removes the manual accept step entirely.</p>
+      {% endif %}
+    </div>
+    <button id="autoBtn" onclick="toggleAutomation()" class="text-white text-sm font-semibold rounded-lg px-4 py-2.5 transition"
+            style="background:{{ 'var(--critical)' if automation.mode == 'auto' else 'var(--brand)' }}">
+      {{ 'Turn OFF full automation' if automation.mode == 'auto' else 'Turn ON full automation' }}
+    </button>
+  </div>
+</div>
+{% endif %}
+
 <div class="card p-5 mb-6">
   <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Generate a fresh suggestion</div>
   <div class="flex flex-wrap items-end gap-3">
@@ -187,6 +213,17 @@ async function generateNow() {
     btn.disabled = false;
     btn.textContent = 'Generate now';
   }
+}
+
+async function toggleAutomation() {
+  const btn = document.getElementById('autoBtn');
+  const turningOn = btn.textContent.includes('ON');
+  if (turningOn && !confirm('This delinks the campaign from the old suggestion table and, in Auto mode, auto-accepts suggestions with no manual click (still push-gated by dry-run until that is turned off separately). Continue?')) {
+    return;
+  }
+  btn.disabled = true;
+  await postJSON(`/api/campaigns/{{ campaign_filter }}/automation`, { brand: BRAND, enabled: turningOn, bid_tolerance_pct: 20 });
+  location.reload();
 }
 
 async function submitAccept(key) {

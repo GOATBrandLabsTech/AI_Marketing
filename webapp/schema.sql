@@ -29,6 +29,16 @@ CREATE TABLE IF NOT EXISTS voylla.campaign_autonomy_mode (
     PRIMARY KEY (campaign_id, brand)
 );
 
+-- ondemand_managed: this campaign's suggestions come ONLY from the on-demand
+-- pipeline (blinkit_ondemand_actions) - the legacy Blinkit_actions_llm-backed
+-- Pending Actions view hides it entirely so nobody sees two conflicting
+-- suggestion streams for the same campaign. bid_tolerance_pct is the hard
+-- ceiling the on-demand engine clamps any single CPM move to for this
+-- campaign when mode = 'auto' (the rule engine already targets ~10%; this
+-- is the authorized upper bound, not the normal step size).
+ALTER TABLE voylla.campaign_autonomy_mode ADD COLUMN IF NOT EXISTS ondemand_managed BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE voylla.campaign_autonomy_mode ADD COLUMN IF NOT EXISTS bid_tolerance_pct NUMERIC NOT NULL DEFAULT 20;
+
 -- One additive column on the existing Blinkit_actions_llm table (everything
 -- above is new tables only). Needed so a row that Auto Mode pushed with no
 -- human review can be told apart from one a person actually accepted -

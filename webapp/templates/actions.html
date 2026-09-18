@@ -27,6 +27,14 @@
   {% endif %}
 </div>
 
+{% if not chooser %}
+<div class="mb-4">
+  <input type="text" id="campaignFilterInput" oninput="filterActionsByCampaign()" placeholder="Filter by campaign name or ID&hellip;"
+         class="w-full max-w-md rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+  <span id="campaignFilterCount" class="text-xs ml-2" style="color:var(--ink-muted)"></span>
+</div>
+{% endif %}
+
 {% if not chooser and action_counts %}
 {% set action_colors = {
   'NO_CHANGE':     {'bg': '#eeeeec', 'fg': 'var(--ink-2)',    'dot': '#c3c2b7'},
@@ -78,7 +86,7 @@
 </div>
 <div class="card overflow-hidden">
   <div class="overflow-x-auto max-h-[75vh]">
-    <table class="data w-full text-sm">
+    <table class="data w-full text-sm" id="actionsTable">
       <thead>
         <tr class="text-left border-b" style="border-color:var(--grid)">
           <th class="px-4 py-3 w-8"><input type="checkbox" id="selectAllChk" onchange="toggleSelectAll(this)" class="w-4 h-4 rounded" style="accent-color:var(--brand)"></th>
@@ -93,7 +101,7 @@
       </thead>
       <tbody>
         {% for r in rows %}
-        <tr class="border-b" style="border-color:var(--grid)">
+        <tr class="border-b" style="border-color:var(--grid)" data-search="{{ (r.campaign_name ~ ' ' ~ r.campaign_id)|lower }}" data-key="{{ r.unique_key }}">
           <td class="px-4 py-2.5"><input type="checkbox" class="row-chk w-4 h-4 rounded" style="accent-color:var(--brand)" data-key="{{ r.unique_key }}" onchange="updateBulkBar()"></td>
           <td class="px-4 py-2.5 font-medium">{{ r.campaign_name }}</td>
           <td class="px-4 py-2.5">{{ r.targeting }}</td>
@@ -183,6 +191,20 @@ async function submitAccept(key) {
   });
   toast('Saved', true);
   setTimeout(() => location.reload(), 600);
+}
+
+function filterActionsByCampaign() {
+  const q = document.getElementById('campaignFilterInput').value.trim().toLowerCase();
+  const rows = document.querySelectorAll('#actionsTable tbody tr[data-search]');
+  let visible = 0;
+  rows.forEach(tr => {
+    const match = !q || tr.dataset.search.includes(q);
+    tr.style.display = match ? '' : 'none';
+    const detail = document.getElementById('row-' + tr.dataset.key);
+    if (detail && !match) detail.classList.add('hidden');
+    if (match) visible++;
+  });
+  document.getElementById('campaignFilterCount').textContent = q ? `${visible} of ${rows.length} match` : '';
 }
 
 function toggleSelectAll(chk) {

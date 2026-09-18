@@ -77,6 +77,11 @@
               <option value="{{ m }}" {{ 'selected' if r.autonomy_mode == m else '' }}>{{ {'auto':'Auto','semi_auto':'Semi-auto','manual':'Manual'}[m] }}</option>
               {% endfor %}
             </select>
+            {% if r.ondemand_managed %}
+            <a href="{{ url_for('ondemand', campaign_id=r.campaign_id) }}" data-soft class="badge mt-1" style="background:#eaf1fd;color:#1d5fc9;" title="Delinked from Blinkit_actions_llm - managed by the On-Demand AI engine only">
+              <span class="dot" style="background:#1d5fc9"></span>On-Demand
+            </a>
+            {% endif %}
           </td>
           <td class="px-4 py-2.5 text-right">{{ r.window_count }}</td>
           <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.next_start or '-' }}</td>

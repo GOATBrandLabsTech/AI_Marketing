@@ -43,10 +43,18 @@ flag numbers from the last 2 days as provisional if it's relevant to the questio
 - There are two separate recommendation sources, in two separate tables: get_pending_actions_summary \
 covers the scheduled weekly/daily batch (the one that can actually reach a live bid via the \
 separate implement step); get_ondemand_suggestions covers On-Demand AI - suggestions generated \
-manually from that page, right now, for one campaign at a time. They never share rows. If asked \
+manually or on a daily schedule for one campaign at a time. They never share rows. If asked \
 "did we generate/run/check anything for X" without the word "pending" or "scheduled", check \
 get_ondemand_suggestions too - don't assume nothing happened just because the scheduled summary \
 is quiet.
+- A campaign can be "on-demand-managed": fully delinked from Blinkit_actions_llm, so \
+get_pending_actions_summary will show nothing for it on purpose - all of its suggestions live in \
+get_ondemand_suggestions instead. Use get_automation_status to check this before concluding a \
+campaign has no recommendations at all. A managed campaign in autonomy mode "auto" runs \
+end-to-end with no manual step: the daily run generates a suggestion, auto-accepts it (skipping \
+only rows flagged REVIEW), and the scheduled push script sends it to Blinkit live - within an \
+authorized per-move CPM tolerance (bid_tolerance_pct, e.g. 20%). "semi_auto" means suggestions \
+still need a human accept/override on the On-Demand AI page.
 """
 
 TOOLS = [
@@ -142,6 +150,24 @@ TOOLS = [
         },
     },
     {
+        "name": "get_automation_status",
+        "description": (
+            "Whether a campaign is fully automated: on-demand-managed (delinked from "
+            "Blinkit_actions_llm, suggestions only from the on-demand engine), its autonomy "
+            "mode (auto/semi_auto/manual - 'auto' means the daily run auto-accepts with no "
+            "manual click), and its authorized bid-move tolerance percent. Use for 'is auto "
+            "mode on for X', 'is X fully automated', 'what campaigns are on autopilot'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string"},
+                "search": {"type": "string", "description": "Campaign name substring to filter to, optional"},
+            },
+            "required": ["brand"],
+        },
+    },
+    {
         "name": "get_ondemand_suggestions",
         "description": (
             "On-Demand AI Suggestions: recommendations generated manually from that page, right "
@@ -179,6 +205,24 @@ def _jsonable(v):
     if isinstance(v, Decimal):
         return float(v)
     return str(v)
+
+
+def _norm(s):
+    return "".join(ch for ch in (s or "").lower() if ch.isalnum() or ch.isspace())
+
+
+def _matches(campaign_name, campaign_id, search):
+    """Forgiving match for LLM-guessed search strings: an exact numeric ID,
+    or every whitespace-separated word in `search` appearing somewhere in
+    the campaign name, punctuation/case-insensitive (so "City Targeting
+    Mumbai" matches "City Targeting (Mumbai) 28 aug")."""
+    if not search:
+        return True
+    s = search.strip()
+    if s.isdigit():
+        return str(campaign_id) == s
+    name = _norm(campaign_name)
+    return all(word in name for word in _norm(s).split())
 
 
 def _cap_rows(rows, n, key=None):
@@ -279,7 +323,6 @@ def _tool_campaign_status(brand, search=None):
     status_counts = Counter(r["last_status"] for r in rows)
     matched = None
     if search:
-        s = search.lower()
         matched = [
             {
                 "campaign_id": r["campaign_id"],
@@ -289,7 +332,7 @@ def _tool_campaign_status(brand, search=None):
                 "window_count": r["window_count"],
             }
             for r in rows
-            if s in (r["campaign_name"] or "").lower()
+            if _matches(r["campaign_name"], r["campaign_id"], search)
         ][:20]
     return {
         "total_campaigns": len(rows),
@@ -327,8 +370,7 @@ def _tool_recommendation_impact(brand, since_days=30, verdict=None):
 def _tool_ondemand_suggestions(brand, search=None):
     rows = queries.fetch_ondemand_actions(brand)
     if search:
-        s = search.lower()
-        rows = [r for r in rows if s in (r["campaign_name"] or "").lower()]
+        rows = [r for r in rows if _matches(r["campaign_name"], r["campaign_id"], search)]
     if not rows:
         return {"total": 0, "note": "no on-demand suggestions found for this brand/campaign name"}
 
@@ -367,6 +409,28 @@ def _tool_ondemand_suggestions(brand, search=None):
     }
 
 
+def _tool_automation_status(brand, search=None):
+    rows = queries.fetch_campaign_status(brand)
+    if search:
+        rows = [r for r in rows if _matches(r["campaign_name"], r["campaign_id"], search)]
+    matched = [
+        {
+            "campaign_id": r["campaign_id"],
+            "campaign_name": r["campaign_name"],
+            "ondemand_managed": r["ondemand_managed"],
+            "autonomy_mode": r["autonomy_mode"],
+            "bid_tolerance_pct": float(r["bid_tolerance_pct"]) if r["bid_tolerance_pct"] is not None else None,
+        }
+        for r in rows
+    ]
+    fully_automated = [m for m in matched if m["ondemand_managed"] and m["autonomy_mode"] == "auto"]
+    return {
+        "matched_count": len(matched),
+        "fully_automated_count": len(fully_automated),
+        "campaigns": matched[:20],
+    }
+
+
 TOOL_FUNCTIONS = {
     "get_channel_performance": _tool_channel_performance,
     "get_before_after_keywords": _tool_before_after_keywords,
@@ -374,6 +438,7 @@ TOOL_FUNCTIONS = {
     "get_campaign_status": _tool_campaign_status,
     "get_recommendation_impact": _tool_recommendation_impact,
     "get_ondemand_suggestions": _tool_ondemand_suggestions,
+    "get_automation_status": _tool_automation_status,
 }
 
 

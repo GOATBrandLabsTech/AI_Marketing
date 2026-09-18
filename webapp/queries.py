@@ -208,23 +208,55 @@ def fetch_campaign_status(brand):
     with get_cursor() as cur:
         cur.execute(CAMPAIGN_STATUS_SQL, {"brand": brand})
         rows = cur.fetchall()
-    modes = fetch_autonomy_modes(brand)
+    settings = fetch_autonomy_settings(brand)
     for r in rows:
-        r["autonomy_mode"] = modes.get(str(r["campaign_id"]), "semi_auto")
+        s = settings.get(str(r["campaign_id"]))
+        r["autonomy_mode"] = s["mode"] if s else "semi_auto"
+        r["ondemand_managed"] = s["ondemand_managed"] if s else False
+        r["bid_tolerance_pct"] = s["bid_tolerance_pct"] if s else 20
     return rows
 
 
-def fetch_autonomy_modes(brand):
-    """campaign_id -> mode for every campaign that has an explicit setting;
-    anything absent defaults to 'semi_auto' (today's behaviour: AI proposes,
-    a human accepts) so this table only needs a row when someone changes a
-    campaign away from the default."""
+def fetch_autonomy_settings(brand):
+    """campaign_id -> {mode, ondemand_managed, bid_tolerance_pct} for every
+    campaign that has an explicit row; anything absent defaults to
+    semi_auto / not on-demand-managed / 20% tolerance, so this table only
+    needs a row when someone changes a campaign away from the default."""
     with get_cursor() as cur:
         cur.execute(
-            "SELECT campaign_id, mode FROM voylla.campaign_autonomy_mode WHERE brand = %(brand)s",
+            "SELECT campaign_id, mode, ondemand_managed, bid_tolerance_pct "
+            "FROM voylla.campaign_autonomy_mode WHERE brand = %(brand)s",
             {"brand": brand},
         )
-        return {r["campaign_id"]: r["mode"] for r in cur.fetchall()}
+        return {r["campaign_id"]: r for r in cur.fetchall()}
+
+
+def fetch_autonomy_modes(brand):
+    """Back-compat: campaign_id -> mode string only."""
+    return {cid: s["mode"] for cid, s in fetch_autonomy_settings(brand).items()}
+
+
+def fetch_ondemand_managed_ids(brand):
+    """campaign_ids (as strings) that are fully delinked from
+    Blinkit_actions_llm and managed exclusively by the on-demand pipeline."""
+    return {
+        cid for cid, s in fetch_autonomy_settings(brand).items() if s["ondemand_managed"]
+    }
+
+
+def fetch_autonomy_setting(campaign_id, brand):
+    """Single-campaign lookup - {mode, ondemand_managed, bid_tolerance_pct},
+    defaulted, for the on-demand engine's auto-accept + tolerance clamp."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT mode, ondemand_managed, bid_tolerance_pct FROM voylla.campaign_autonomy_mode "
+            "WHERE campaign_id = %(campaign_id)s AND brand = %(brand)s",
+            {"campaign_id": str(campaign_id), "brand": brand},
+        )
+        row = cur.fetchone()
+    if row:
+        return row
+    return {"mode": "semi_auto", "ondemand_managed": False, "bid_tolerance_pct": 20}
 
 
 def set_autonomy_mode(campaign_id, brand, mode, set_by=None):
@@ -239,6 +271,29 @@ def set_autonomy_mode(campaign_id, brand, mode, set_by=None):
                 SET mode = EXCLUDED.mode, set_by = EXCLUDED.set_by, set_at = NOW()
             """,
             {"campaign_id": str(campaign_id), "brand": brand, "mode": mode, "set_by": set_by},
+        )
+
+
+def set_ondemand_managed(campaign_id, brand, managed, bid_tolerance_pct=20, set_by=None):
+    """Turns full on-demand management on/off for one campaign. Does NOT
+    touch `mode` - a caller that wants the "auto button" behaviour (auto
+    generate + auto accept, no manual step) should also call
+    set_autonomy_mode(campaign_id, brand, 'auto', ...)."""
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO voylla.campaign_autonomy_mode
+                (campaign_id, brand, mode, ondemand_managed, bid_tolerance_pct, set_by, set_at)
+            VALUES (%(campaign_id)s, %(brand)s, 'semi_auto', %(managed)s, %(tol)s, %(set_by)s, NOW())
+            ON CONFLICT (campaign_id, brand) DO UPDATE
+                SET ondemand_managed = EXCLUDED.ondemand_managed,
+                    bid_tolerance_pct = EXCLUDED.bid_tolerance_pct,
+                    set_by = EXCLUDED.set_by, set_at = NOW()
+            """,
+            {
+                "campaign_id": str(campaign_id), "brand": brand,
+                "managed": bool(managed), "tol": bid_tolerance_pct, "set_by": set_by,
+            },
         )
 
 
@@ -671,6 +726,11 @@ def count_decisions_on_date(brand, action_date):
 
 
 def fetch_pending_actions(brand, action_date):
+    """Never returns a row for a campaign that's on-demand-managed - that
+    campaign is fully delinked from Blinkit_actions_llm, so its suggestions
+    only ever come from voylla.blinkit_ondemand_actions (see the On-Demand
+    AI page) instead of showing up twice from two disagreeing systems."""
+    managed = fetch_ondemand_managed_ids(brand)
     with get_cursor() as cur:
         cur.execute(
             'SELECT * FROM voylla."Blinkit_actions_llm" '
@@ -678,7 +738,10 @@ def fetch_pending_actions(brand, action_date):
             "ORDER BY campaign_name, targeting",
             {"brand": brand, "action_date": action_date},
         )
-        return cur.fetchall()
+        rows = cur.fetchall()
+    if not managed:
+        return rows
+    return [r for r in rows if str(r["campaign_id"]) not in managed]
 
 
 def accept_action(unique_key, brand, accept, cpm_llm_override, note):

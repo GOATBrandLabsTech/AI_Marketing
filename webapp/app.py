@@ -365,15 +365,37 @@ def ondemand():
     campaign_label_map = {
         f"{c['campaign_name']} (#{c['campaign_id']})": str(c["campaign_id"]) for c in campaigns
     }
+    automation = None
+    if campaign_filter:
+        automation = queries.fetch_autonomy_setting(campaign_filter, brand)
+        match = next((c for c in campaigns if str(c["campaign_id"]) == str(campaign_filter)), None)
+        automation["campaign_name"] = match["campaign_name"] if match else None
     return render_template(
         "ondemand.html",
         campaigns=campaigns,
         campaign_label_map=campaign_label_map,
         rows=rows,
         campaign_filter=campaign_filter,
+        automation=automation,
         action_options=queries.ACTION_OPTIONS,
         active="ondemand",
     )
+
+
+@app.route("/api/campaigns/<campaign_id>/automation", methods=["POST"])
+@login_required
+def api_set_automation(campaign_id):
+    """The single 'auto button': turns full automation on/off for one
+    campaign - delinks it from Blinkit_actions_llm (ondemand_managed) and
+    sets autonomy mode to 'auto' (daily generation auto-accepts) in one
+    call, or reverses both."""
+    payload = request.get_json(force=True) or {}
+    brand = payload.get("brand", current_brand())
+    enabled = bool(payload.get("enabled"))
+    tolerance_pct = payload.get("bid_tolerance_pct", 20)
+    queries.set_ondemand_managed(campaign_id, brand, enabled, bid_tolerance_pct=tolerance_pct, set_by=session.get("brand"))
+    queries.set_autonomy_mode(campaign_id, brand, "auto" if enabled else "semi_auto", set_by=session.get("brand"))
+    return jsonify({"ok": True})
 
 
 @app.route("/api/ondemand/generate", methods=["POST"])
