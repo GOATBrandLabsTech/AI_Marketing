@@ -1606,7 +1606,11 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
                     cpm_change      = 0
                     a["cpm_change"] = 0
 
-            unique_key    = f"ondemand_{campaign_id}_{date_str}_{targeting}_{action}_{int(time.time())}"
+            # Deterministic (no action/timestamp in the key): re-running
+            # generation for this campaign later the same day must land on
+            # the SAME row for a given keyword, not stack up duplicates -
+            # save_ondemand_action upserts on this key.
+            unique_key    = f"ondemand_{campaign_id}_{date_str}_{targeting}"
             cpm_floor_val = a.get("cpm_floor")
             search_tier   = str(a.get("search_volume_tier") or "UNKNOWN")
 
@@ -1672,7 +1676,17 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
 
 def save_ondemand_action(engine, action_obj, brand, requested_by=None, tolerance_pct=20):
     """Same safety-guard pipeline as the scheduled pipeline's save_llm_action,
-    writing into voylla.blinkit_ondemand_actions instead of Blinkit_actions_llm."""
+    writing into voylla.blinkit_ondemand_actions instead of Blinkit_actions_llm.
+
+    unique_key is one row per (campaign_id, targeting, action_date) - running
+    generation twice in a day for the same campaign (a manual "Generate now"
+    click plus the daily schedule, say) upserts the SAME row with the fresher
+    analysis instead of stacking duplicates. The upsert is gated by
+    `WHERE user_implemented IS NULL`: once a row has been accepted, rejected,
+    or auto-accepted, a later regeneration that same day is silently dropped
+    for that keyword rather than overwriting a decision already made - the
+    returned/auto-accept-eligible rows are only the ones actually written.
+    """
     clean_rows = _build_clean_rows(action_obj, brand, tolerance_pct=tolerance_pct)
     if not clean_rows:
         return []
@@ -1680,7 +1694,7 @@ def save_ondemand_action(engine, action_obj, brand, requested_by=None, tolerance
     for r in clean_rows:
         r["requested_by"] = requested_by
 
-    insert_sql = text("""
+    upsert_sql = text("""
         INSERT INTO voylla.blinkit_ondemand_actions
         (unique_key, action_date, campaign_id, campaign_name,
          targeting, action, bid_change, confidence,
@@ -1693,13 +1707,36 @@ def save_ondemand_action(engine, action_obj, brand, requested_by=None, tolerance
          :explanation, :alternative_keywords, :Brand, :current_cpm, :campaign_budget,
          :cpm_floor, :search_volume_tier, :quick_action, :rule_action, :decision_step,
          :requested_by)
+        ON CONFLICT (unique_key) DO UPDATE SET
+            action               = EXCLUDED.action,
+            bid_change           = EXCLUDED.bid_change,
+            confidence           = EXCLUDED.confidence,
+            explanation          = EXCLUDED.explanation,
+            alternative_keywords = EXCLUDED.alternative_keywords,
+            current_cpm          = EXCLUDED.current_cpm,
+            campaign_budget      = EXCLUDED.campaign_budget,
+            cpm_floor            = EXCLUDED.cpm_floor,
+            search_volume_tier   = EXCLUDED.search_volume_tier,
+            quick_action         = EXCLUDED.quick_action,
+            rule_action          = EXCLUDED.rule_action,
+            decision_step        = EXCLUDED.decision_step,
+            requested_by         = EXCLUDED.requested_by,
+            requested_at         = NOW()
+        WHERE voylla.blinkit_ondemand_actions.user_implemented IS NULL
+        RETURNING unique_key
     """)
+    written_keys = set()
     with engine.begin() as conn:
         for row in clean_rows:
-            conn.execute(insert_sql, {**row, "alternative_keywords": json.dumps(row["alternative_keywords"])})
+            result = conn.execute(upsert_sql, {**row, "alternative_keywords": json.dumps(row["alternative_keywords"])})
+            written_keys.update(r[0] for r in result)
 
-    accepted = _auto_accept_if_enabled(brand, clean_rows[0]["campaign_id"], clean_rows)
-    print(f"[ondemand] inserted {len(clean_rows)} suggestion row(s) for campaign {clean_rows[0]['campaign_id']}"
+    fresh_rows = [r for r in clean_rows if r["unique_key"] in written_keys]
+    skipped = len(clean_rows) - len(fresh_rows)
+
+    accepted = _auto_accept_if_enabled(brand, clean_rows[0]["campaign_id"], fresh_rows)
+    print(f"[ondemand] wrote {len(fresh_rows)}/{len(clean_rows)} suggestion row(s) for campaign {clean_rows[0]['campaign_id']}"
+          + (f", {skipped} already-decided keyword(s) left untouched" if skipped else "")
           + (f" - auto-accepted {accepted} (autonomy mode 'auto')" if accepted else ""))
     return clean_rows
 
