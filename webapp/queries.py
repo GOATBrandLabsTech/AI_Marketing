@@ -1045,6 +1045,34 @@ def accept_ondemand_action(unique_key, brand, accept, cpm_llm_override, note):
         return cur.rowcount
 
 
+AUTO_ACCEPT_ACTIONS = {"INCREASE_CPM", "DECREASE_CPM", "PAUSE"}
+
+
+def auto_accept_pending_ondemand(campaign_id, brand, tolerance_pct=20):
+    """Sweeps every currently-undecided, actionable on-demand suggestion for
+    one campaign and accepts it as-is (INCREASE_CPM/DECREASE_CPM/PAUSE, never
+    a REVIEW-flagged row) - the same eligibility rule the engine applies
+    right after generation, but run against whatever is already sitting
+    there. Used when a campaign is switched into full-automation mode, so
+    turning Auto on doesn't leave a backlog of suggestions waiting on a
+    manual click that will now never come. Returns how many were accepted."""
+    rows = fetch_ondemand_actions(brand, campaign_id=campaign_id, limit=500)
+    accepted = 0
+    for r in rows:
+        if r["user_implemented"] is not None or r["override_action"]:
+            continue
+        if r["action"] not in AUTO_ACCEPT_ACTIONS:
+            continue
+        if r["quick_action"] == "REVIEW":
+            continue
+        accept_ondemand_action(
+            r["unique_key"], brand, True, None,
+            f"auto-accepted - autonomy mode 'auto', tolerance {float(tolerance_pct):.0f}% (swept on enabling automation)",
+        )
+        accepted += 1
+    return accepted
+
+
 def bulk_accept_ondemand_actions(unique_keys, brand):
     """Accept-as-is for many on-demand rows at once (Pending Actions "select all")."""
     if not unique_keys:

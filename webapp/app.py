@@ -398,7 +398,8 @@ def api_set_automation(campaign_id):
     tolerance_pct = payload.get("bid_tolerance_pct", 20)
     queries.set_ondemand_managed(campaign_id, brand, enabled, bid_tolerance_pct=tolerance_pct, set_by=session.get("brand"))
     queries.set_autonomy_mode(campaign_id, brand, "auto" if enabled else "semi_auto", set_by=session.get("brand"))
-    return jsonify({"ok": True})
+    swept = queries.auto_accept_pending_ondemand(campaign_id, brand, tolerance_pct=tolerance_pct) if enabled else 0
+    return jsonify({"ok": True, "swept": swept})
 
 
 @app.route("/api/ondemand/generate", methods=["POST"])

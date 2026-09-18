@@ -218,12 +218,17 @@ async function generateNow() {
 async function toggleAutomation() {
   const btn = document.getElementById('autoBtn');
   const turningOn = btn.textContent.includes('ON');
-  if (turningOn && !confirm('This delinks the campaign from the old suggestion table and, in Auto mode, auto-accepts suggestions with no manual click (still push-gated by dry-run until that is turned off separately). Continue?')) {
+  if (turningOn && !confirm('This delinks the campaign from the old suggestion table and, in Auto mode, auto-accepts suggestions with no manual click - including any undecided suggestions already sitting here right now (still push-gated by dry-run until that is turned off separately). Continue?')) {
     return;
   }
   btn.disabled = true;
-  await postJSON(`/api/campaigns/{{ campaign_filter }}/automation`, { brand: BRAND, enabled: turningOn, bid_tolerance_pct: 20 });
-  location.reload();
+  const result = await postJSON(`/api/campaigns/{{ campaign_filter }}/automation`, { brand: BRAND, enabled: turningOn, bid_tolerance_pct: 20 });
+  if (turningOn && result.swept) {
+    toast(`Auto mode on - swept and accepted ${result.swept} pending suggestion(s)`, true);
+    setTimeout(() => location.reload(), 900);
+  } else {
+    location.reload();
+  }
 }
 
 async function submitAccept(key) {
