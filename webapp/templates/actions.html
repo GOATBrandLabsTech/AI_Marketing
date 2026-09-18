@@ -8,23 +8,11 @@
     <p class="text-sm mt-0.5" style="color:var(--ink-2)">Pick a brand to review its AI recommendations.</p>
     {% else %}
     <p class="text-sm mt-0.5" style="color:var(--ink-2)">
-      {{ rows|length }}{% if action_filter %} of {{ total_count }}{% endif %} AI recommendations for <span class="font-semibold text-ink">{{ action_date }}</span> &middot; {{ brand }}.
+      {{ rows|length }}{% if action_filter %} of {{ total_count }}{% endif %} on-demand AI recommendations &middot; {{ brand }}, most recent first.
       Accept, adjust the CPM change, or override the action entirely.
     </p>
     {% endif %}
   </div>
-  {% if not chooser and action_dates %}
-  <form method="get" data-soft>
-    <input type="hidden" name="brand" value="{{ brand }}">
-    {% if action_filter %}<input type="hidden" name="action" value="{{ action_filter }}">{% endif %}
-    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Action date</label>
-    <select name="date" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
-      {% for d in action_dates %}
-      <option value="{{ d }}" {{ 'selected' if d == action_date else '' }}>{{ d }}</option>
-      {% endfor %}
-    </select>
-  </form>
-  {% endif %}
 </div>
 
 {% if not chooser %}
@@ -46,14 +34,14 @@
 <div class="mb-6">
   <div class="text-sm font-semibold text-ink mb-3">By action <span class="font-normal" style="color:var(--ink-muted)">&mdash; click to filter</span></div>
   <div class="flex flex-wrap gap-3">
-    <a href="{{ url_for('actions', brand=brand, date=action_date) }}" data-soft
+    <a href="{{ url_for('actions', brand=brand) }}" data-soft
        class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not action_filter else '' }}">
       <div class="font-display text-xl font-bold text-ink">{{ total_count }}</div>
       <div class="text-xs" style="color:var(--ink-muted)">All</div>
     </a>
     {% for name, count in action_counts.items()|sort(attribute='1', reverse=true) %}
     {% set c = action_colors.get(name, {'bg': '#f2f2f0', 'fg': 'var(--ink-muted)', 'dot': '#d5d4cf'}) %}
-    <a href="{{ url_for('actions', brand=brand, date=action_date, action=name) }}" data-soft
+    <a href="{{ url_for('actions', brand=brand, action=name) }}" data-soft
        class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px ' ~ c.dot if action_filter == name else '' }}">
       <div class="font-display text-xl font-bold" style="color:{{ c.fg }}">{{ count }}</div>
       <div class="text-xs flex items-center gap-1.5" style="color:var(--ink-muted)"><span class="w-1.5 h-1.5 rounded-full" style="background:{{ c.dot }}"></span>{{ name }}</div>
@@ -69,9 +57,7 @@
   <a href="{{ url_for('actions', brand=c.brand) }}" data-soft class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
     <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">{{ c.brand }}</div>
     <div class="font-display text-2xl font-bold text-ink">{{ c.count }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">
-      {% if c.action_date %}recommendations for {{ c.action_date }}{% else %}no recommendations yet{% endif %}
-    </div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">on-demand recommendations</div>
   </a>
   {% endfor %}
 </div>
@@ -114,7 +100,7 @@
           <td class="px-4 py-2.5 text-right whitespace-nowrap">{{ r.current_cpm }}{% if r.bid_change %} <span style="color:var(--ink-muted)">(&Delta;{{ r.bid_change }})</span>{% endif %}</td>
           <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.confidence if r.confidence is not none else '-' }}</td>
           <td class="px-4 py-2.5">
-            {% if r.is_auto_applied %}<span class="badge" style="background:#e6f0ff;color:#0a4a9c;" title="Applied automatically by AI - no human review"><span class="dot" style="background:#0a4a9c"></span>&#129302; auto-applied</span>
+            {% if r.override_note and 'auto-accepted' in r.override_note %}<span class="badge" style="background:#e6f0ff;color:#0a4a9c;" title="{{ r.override_note }}"><span class="dot" style="background:#0a4a9c"></span>&#129302; auto-accepted</span>
             {% elif r.override_action %}<span class="badge" style="background:#efeafb;color:#5b3fb8;"><span class="dot" style="background:#4a3aa7"></span>override: {{ r.override_action }}</span>
             {% elif r.user_implemented == 'true' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>accepted</span>
             {% elif r.user_implemented == 'false' %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>rejected</span>
@@ -170,7 +156,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No recommendations for this date.</td></tr>
+        <tr><td colspan="8" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No on-demand suggestions yet - generate one from the On-Demand AI page.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -186,7 +172,7 @@ async function submitAccept(key) {
   const accept = document.getElementById('accept-chk-' + key).checked;
   const cpm = document.getElementById('accept-cpm-' + key).value;
   const note = document.getElementById('accept-note-' + key).value;
-  await postJSON(`/api/actions/${encodeURIComponent(key)}/accept`, {
+  await postJSON(`/api/ondemand/${encodeURIComponent(key)}/accept`, {
     brand: BRAND, accept, cpm_llm_override: cpm === '' ? null : Number(cpm), note,
   });
   toast('Saved', true);
@@ -230,7 +216,7 @@ async function bulkAccept() {
   const keys = [...document.querySelectorAll('.row-chk:checked')].map(c => c.dataset.key);
   if (keys.length === 0) return;
   if (!confirm(`Accept ${keys.length} recommendation(s) as-is? This cannot be bulk-undone.`)) return;
-  await postJSON('/api/actions/bulk_accept', { brand: BRAND, unique_keys: keys });
+  await postJSON('/api/ondemand/bulk_accept', { brand: BRAND, unique_keys: keys });
   toast(`Accepted ${keys.length}`, true);
   setTimeout(() => location.reload(), 600);
 }
@@ -239,7 +225,7 @@ async function submitOverride(key) {
   const action = document.getElementById('override-action-' + key).value;
   const cpm = document.getElementById('override-cpm-' + key).value;
   const note = document.getElementById('override-note-' + key).value;
-  await postJSON(`/api/actions/${encodeURIComponent(key)}/override`, {
+  await postJSON(`/api/ondemand/${encodeURIComponent(key)}/override`, {
     brand: BRAND, override_action: action, cpm_change_user: cpm === '' ? null : Number(cpm), note,
   });
   toast('Override saved', true);

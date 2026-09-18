@@ -141,6 +141,165 @@ LEFT JOIN windows w ON w.unique_key = a.unique_key
 ORDER BY a.action_date DESC, a.campaign_name, a.targeting
 """
 
+ONDEMAND_ROAS_IMPACT_SQL = """
+WITH actions AS (
+    SELECT
+        l.unique_key,
+        l.campaign_id,
+        l.campaign_name,
+        l.targeting,
+        l.action_date                              AS action_date,
+        l.action,
+        l.rule_action,
+        l.quick_action,
+        l.decision_step,
+        l.confidence,
+        l.bid_change,
+        l.current_cpm,
+        l.campaign_budget,
+        l.explanation,
+        l.alternative_keywords::TEXT              AS alternative_keywords,
+        l.user_implemented,
+        l.override_action,
+        l.override_note,
+        l.cpm_llm_override,
+        l.cpm_change_user,
+        l.implementation_date,
+        l.push_status,
+        l."Brand",
+        (l.rule_action IS NOT NULL
+         AND l.rule_action <> ''
+         AND l.rule_action <> l.action)           AS diverged,
+        (l.push_status = 'done')                  AS was_implemented,
+        CASE
+            WHEN l.user_implemented = 'false' AND l.override_action ILIKE 'INCREASE%%'
+                THEN (l.current_cpm * (1 + COALESCE(l.cpm_change_user, 0) / 100.0))::INT
+            WHEN l.user_implemented = 'false' AND l.override_action ILIKE 'DECREASE%%'
+                THEN (l.current_cpm * (1 - COALESCE(l.cpm_change_user, 0) / 100.0))::INT
+            WHEN l.user_implemented = 'true'  AND l.cpm_llm_override IS NOT NULL
+                 AND l.action ILIKE 'INCREASE%%'
+                THEN (l.current_cpm * (1 + l.cpm_llm_override / 100.0))::INT
+            WHEN l.user_implemented = 'true'  AND l.cpm_llm_override IS NOT NULL
+                 AND l.action ILIKE 'DECREASE%%'
+                THEN (l.current_cpm * (1 - l.cpm_llm_override / 100.0))::INT
+            WHEN l.user_implemented = 'true'  AND l.action ILIKE 'INCREASE%%'
+                THEN (l.current_cpm + COALESCE(l.bid_change, 0))::INT
+            WHEN l.user_implemented = 'true'  AND l.action ILIKE 'DECREASE%%'
+                THEN (l.current_cpm - COALESCE(l.bid_change, 0))::INT
+            ELSE NULL
+        END                                       AS cpm_intended
+    FROM voylla.blinkit_ondemand_actions l
+    WHERE (%(brand)s = '__ALL__' OR l."Brand" = %(brand)s)
+      AND l.action_date >= %(since)s
+),
+performance AS (
+    SELECT
+        TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date AS report_date,
+        "Campaign ID"::TEXT                        AS campaign_id,
+        "Targeting Value"                          AS targeting,
+        SUM("Estimated Budget Consumed")           AS spend,
+        SUM("Direct Sales" + "Indirect Sales")     AS sales,
+        SUM("Impressions")                         AS impressions
+    FROM voylla."Blinkit_Ads_Report"
+    WHERE (%(brand)s = '__ALL__' OR "Brand" = %(brand)s)
+    GROUP BY 1, 2, 3
+),
+windows AS (
+    SELECT
+        a.unique_key,
+        SUM(p.spend)       FILTER (WHERE p.report_date BETWEEN a.action_date - 7 AND a.action_date - 1) AS spend_before,
+        SUM(p.sales)       FILTER (WHERE p.report_date BETWEEN a.action_date - 7 AND a.action_date - 1) AS sales_before,
+        SUM(p.impressions) FILTER (WHERE p.report_date BETWEEN a.action_date - 7 AND a.action_date - 1) AS impressions_before,
+        COUNT(*)           FILTER (WHERE p.report_date BETWEEN a.action_date - 7 AND a.action_date - 1) AS days_before,
+        SUM(p.spend)       FILTER (WHERE p.report_date BETWEEN a.action_date + 1 AND a.action_date + 7) AS spend_after,
+        SUM(p.sales)       FILTER (WHERE p.report_date BETWEEN a.action_date + 1 AND a.action_date + 7) AS sales_after,
+        SUM(p.impressions) FILTER (WHERE p.report_date BETWEEN a.action_date + 1 AND a.action_date + 7) AS impressions_after,
+        COUNT(*)           FILTER (WHERE p.report_date BETWEEN a.action_date + 1 AND a.action_date + 7) AS days_after
+    FROM actions a
+    LEFT JOIN performance p
+           ON a.campaign_id = p.campaign_id
+          AND lower(replace(a.targeting, '_', ' ')) = lower(p.targeting)
+    GROUP BY a.unique_key
+)
+SELECT
+    a.*,
+    w.spend_before, w.sales_before, w.impressions_before, w.days_before,
+    w.spend_after, w.sales_after, w.impressions_after, w.days_after,
+    ROUND((w.sales_before / NULLIF(w.spend_before, 0))::NUMERIC, 2) AS roas_before,
+    ROUND((w.sales_after  / NULLIF(w.spend_after,  0))::NUMERIC, 2) AS roas_after,
+    ROUND(((w.sales_after / NULLIF(w.spend_after, 0))
+         - (w.sales_before / NULLIF(w.spend_before, 0)))::NUMERIC, 2) AS roas_change,
+    ROUND((w.spend_after - w.spend_before)::NUMERIC, 2)  AS spend_change,
+    (w.impressions_after - w.impressions_before)         AS impressions_change,
+    CASE
+        WHEN a.was_implemented
+         AND w.spend_before > 0 AND w.spend_after > 0
+        THEN CASE
+                WHEN (w.sales_after / w.spend_after) > (w.sales_before / w.spend_before) THEN 'IMPROVED'
+                WHEN (w.sales_after / w.spend_after) < (w.sales_before / w.spend_before) THEN 'WORSENED'
+                ELSE 'FLAT'
+             END
+        ELSE NULL
+    END AS verdict
+FROM actions a
+LEFT JOIN windows w ON w.unique_key = a.unique_key
+ORDER BY a.action_date DESC, a.campaign_name, a.targeting
+"""
+
+
+def fetch_ondemand_roas_impact(brand, since_date, verdict=None, search=None):
+    """Same shape as fetch_roas_impact, sourced from voylla.blinkit_ondemand_actions
+    instead of Blinkit_actions_llm - "was_implemented" here means the independent
+    Blinkit_Ondemand_Bid_Push.ipynb actually pushed it live (push_status = 'done'),
+    not just that someone accepted it. While that script stays in DRY_RUN, nothing
+    is scoreable yet - which is correct: no real bid has gone live, so there is
+    nothing to honestly attribute a ROAS change to."""
+    with get_cursor() as cur:
+        cur.execute(ONDEMAND_ROAS_IMPACT_SQL, {"brand": brand, "since": since_date})
+        rows = cur.fetchall()
+    if verdict:
+        rows = [r for r in rows if r["verdict"] == verdict]
+    if search:
+        s = search.lower()
+        rows = [
+            r
+            for r in rows
+            if s in (r["campaign_name"] or "").lower() or s in (r["targeting"] or "").lower()
+        ]
+    return rows
+
+
+def fetch_ondemand_action_dates(brand, limit=30):
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT action_date FROM voylla.blinkit_ondemand_actions "
+            'WHERE "Brand" = %(brand)s ORDER BY action_date DESC LIMIT %(limit)s',
+            {"brand": brand, "limit": limit},
+        )
+        return [str(r["action_date"]) for r in cur.fetchall()]
+
+
+def fetch_latest_ondemand_action_date(brand):
+    with get_cursor() as cur:
+        cur.execute(
+            'SELECT MAX(action_date) AS d FROM voylla.blinkit_ondemand_actions WHERE "Brand" = %(brand)s',
+            {"brand": brand},
+        )
+        row = cur.fetchone()
+        return row["d"] if row else None
+
+
+def count_ondemand_decisions_on_date(brand, action_date):
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) AS cnt FROM voylla.blinkit_ondemand_actions "
+            'WHERE "Brand" = %(brand)s AND action_date = %(action_date)s '
+            "AND user_implemented IS NOT NULL",
+            {"brand": brand, "action_date": action_date},
+        )
+        return cur.fetchone()["cnt"]
+
+
 CAMPAIGN_STATUS_SQL = """
 WITH scoped AS (
     -- filter to the brand(s) we actually want FIRST - Blinkit_Campaign_Runtime
@@ -234,6 +393,25 @@ def fetch_autonomy_settings(brand):
 def fetch_autonomy_modes(brand):
     """Back-compat: campaign_id -> mode string only."""
     return {cid: s["mode"] for cid, s in fetch_autonomy_settings(brand).items()}
+
+
+def brand_fully_delinked(brand):
+    """True when every campaign that has ever appeared in Blinkit_actions_llm
+    for this brand is on-demand-managed - i.e. Pending Actions can never
+    show a row for this brand again, no matter what date is picked. Used to
+    swap the page's empty-state for a clear "suggestions moved" message
+    instead of a date-picker that looks like it's just missing data."""
+    managed = fetch_ondemand_managed_ids(brand)
+    if not managed:
+        return False
+    with get_cursor() as cur:
+        cur.execute(
+            'SELECT DISTINCT campaign_id::TEXT AS campaign_id FROM voylla."Blinkit_actions_llm" '
+            'WHERE "Brand" = %(brand)s',
+            {"brand": brand},
+        )
+        legacy_ids = {r["campaign_id"] for r in cur.fetchall()}
+    return legacy_ids.issubset(managed)
 
 
 def fetch_ondemand_managed_ids(brand):
@@ -537,9 +715,9 @@ def fetch_before_after_matrix(brand, cutover_date, pre_days=7, min_spend=60, cam
         perf_rows = cur.fetchall()
 
         cur.execute(
-            'SELECT campaign_id, targeting, action, override_action, user_implemented '
-            'FROM voylla."Blinkit_actions_llm" '
-            'WHERE "Brand" = %(brand)s AND action_date::date = %(cutover)s',
+            "SELECT campaign_id, targeting, action, override_action, user_implemented "
+            "FROM voylla.blinkit_ondemand_actions "
+            'WHERE "Brand" = %(brand)s AND action_date = %(cutover)s',
             {"brand": brand, "cutover": cutover_date},
         )
         action_rows = cur.fetchall()
@@ -863,6 +1041,21 @@ def accept_ondemand_action(unique_key, brand, accept, cpm_llm_override, note):
                 "unique_key": unique_key,
                 "brand": brand,
             },
+        )
+        return cur.rowcount
+
+
+def bulk_accept_ondemand_actions(unique_keys, brand):
+    """Accept-as-is for many on-demand rows at once (Pending Actions "select all")."""
+    if not unique_keys:
+        return 0
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.blinkit_ondemand_actions "
+            "SET user_implemented = 'true', "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = ANY(%(unique_keys)s) AND "Brand" = %(brand)s',
+            {"unique_keys": list(unique_keys), "brand": brand},
         )
         return cur.rowcount
 

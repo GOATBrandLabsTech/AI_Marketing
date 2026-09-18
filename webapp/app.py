@@ -126,14 +126,14 @@ def roas():
     action_dates = []
     cutover_date = None
     if brand != queries.ALL_BRANDS:
-        action_dates = queries.fetch_action_dates(brand)
+        action_dates = queries.fetch_ondemand_action_dates(brand)
         default_cutover = date.fromisoformat(action_dates[0]) if action_dates else (date.today() - timedelta(days=1))
         cutover_arg = request.args.get("cutover")
         cutover_date = date.fromisoformat(cutover_arg) if cutover_arg else default_cutover
 
     since_date = (cutover_date or date.today()) - timedelta(days=since_days)
 
-    all_rows = queries.fetch_roas_impact(brand, since_date, search=search)
+    all_rows = queries.fetch_ondemand_roas_impact(brand, since_date, search=search)
     scoreable = [r for r in all_rows if r["verdict"]]
     changes = [float(r["roas_change"]) for r in scoreable if r["roas_change"] is not None]
     kpi = {
@@ -187,7 +187,7 @@ def roas():
             "window_days": window_days,
             "granularity": granularity,
             "scoped_to_showcase": bool(campaign_ids),
-            "decisions_on_cutover": queries.count_decisions_on_date(brand, cutover_date),
+            "decisions_on_cutover": queries.count_ondemand_decisions_on_date(brand, cutover_date),
         }
 
     return render_template(
@@ -216,7 +216,7 @@ def roas_csv():
     cutover_arg = request.args.get("cutover")
     anchor = date.fromisoformat(cutover_arg) if cutover_arg else date.today()
     since_date = anchor - timedelta(days=since_days)
-    rows = queries.fetch_roas_impact(brand, since_date, verdict=verdict, search=search)
+    rows = queries.fetch_ondemand_roas_impact(brand, since_date, verdict=verdict, search=search)
     columns = [
         "action_date", "Brand", "campaign_name", "targeting", "action", "current_cpm",
         "cpm_intended", "roas_before", "roas_after", "roas_change", "spend_change",
@@ -228,22 +228,18 @@ def roas_csv():
 @app.route("/actions")
 @login_required
 def actions():
+    """Pending Actions now shows on-demand history (voylla.blinkit_ondemand_actions)
+    - Blinkit_actions_llm is fully retired from this page. No date picker: this
+    lists recent suggestions across all campaigns, most recent first, same as
+    the On-Demand AI page's default view."""
     brand = current_brand()
     session["brand"] = brand
 
     if brand == queries.ALL_BRANDS:
-        choices = []
-        for b in queries.fetch_brands():
-            d = queries.fetch_latest_action_date(b)
-            count = len(queries.fetch_pending_actions(b, d)) if d else 0
-            choices.append({"brand": b, "action_date": d, "count": count})
+        choices = [{"brand": b, "count": len(queries.fetch_ondemand_actions(b))} for b in queries.fetch_brands()]
         return render_template("actions.html", chooser=choices, active="actions")
 
-    action_dates = queries.fetch_action_dates(brand)
-    requested_date = request.args.get("date")
-    action_date = requested_date or (action_dates[0] if action_dates else None)
-    all_rows = queries.fetch_pending_actions(brand, action_date) if action_date else []
-
+    all_rows = queries.fetch_ondemand_actions(brand, limit=500)
     action_counts = Counter(r["action"] for r in all_rows)
     action_filter = request.args.get("action") or None
     rows = [r for r in all_rows if not action_filter or r["action"] == action_filter]
@@ -254,11 +250,17 @@ def actions():
         total_count=len(all_rows),
         action_counts=action_counts,
         action_filter=action_filter,
-        action_date=action_date,
-        action_dates=action_dates,
         action_options=queries.ACTION_OPTIONS,
         active="actions",
     )
+
+
+@app.route("/api/ondemand/bulk_accept", methods=["POST"])
+@login_required
+def api_ondemand_bulk_accept():
+    payload = request.get_json(force=True) or {}
+    n = queries.bulk_accept_ondemand_actions(payload.get("unique_keys", []), payload.get("brand", current_brand()))
+    return jsonify({"ok": True, "count": n})
 
 
 @app.route("/impact")
@@ -270,7 +272,8 @@ def impact():
     if brand == queries.ALL_BRANDS:
         return render_template("impact.html", chooser=queries.fetch_brands(), active="impact")
 
-    default_cutover = queries.CHUMBAK_SHOWCASE_GO_LIVE if brand == "Chumbak" else (date.today() - timedelta(days=1))
+    latest_ondemand = queries.fetch_latest_ondemand_action_date(brand)
+    default_cutover = latest_ondemand or (date.today() - timedelta(days=1))
     cutover = request.args.get("cutover")
     cutover_date = date.fromisoformat(cutover) if cutover else default_cutover
     pre_days = int(request.args.get("pre_days", 7))

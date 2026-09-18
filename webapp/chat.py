@@ -40,21 +40,23 @@ plainly instead of guessing why.
 user names one explicitly.
 - Today's date is {today}. Blinkit revises the last ~2 days of data as more conversions land, so \
 flag numbers from the last 2 days as provisional if it's relevant to the question.
-- There are two separate recommendation sources, in two separate tables: get_pending_actions_summary \
-covers the scheduled weekly/daily batch (the one that can actually reach a live bid via the \
-separate implement step); get_ondemand_suggestions covers On-Demand AI - suggestions generated \
-manually or on a daily schedule for one campaign at a time. They never share rows. If asked \
-"did we generate/run/check anything for X" without the word "pending" or "scheduled", check \
-get_ondemand_suggestions too - don't assume nothing happened just because the scheduled summary \
-is quiet.
-- A campaign can be "on-demand-managed": fully delinked from Blinkit_actions_llm, so \
-get_pending_actions_summary will show nothing for it on purpose - all of its suggestions live in \
-get_ondemand_suggestions instead. Use get_automation_status to check this before concluding a \
-campaign has no recommendations at all. A managed campaign in autonomy mode "auto" runs \
-end-to-end with no manual step: the daily run generates a suggestion, auto-accepts it (skipping \
-only rows flagged REVIEW), and the scheduled push script sends it to Blinkit live - within an \
-authorized per-move CPM tolerance (bid_tolerance_pct, e.g. 20%). "semi_auto" means suggestions \
-still need a human accept/override on the On-Demand AI page.
+- get_pending_actions_summary and get_ondemand_suggestions read the SAME table \
+(voylla.blinkit_ondemand_actions) - Blinkit_actions_llm, the old scheduled-batch table, has been \
+fully retired from every surface of this dashboard (Pending Actions, ROAS Impact, Before/After all \
+switched over). Every campaign, across all three brands, is on-demand-managed. \
+get_pending_actions_summary defaults to recent history across all campaigns; get_ondemand_suggestions \
+is the same data with a campaign-name search filter. Use whichever the question's phrasing suggests, \
+they'll agree.
+- A managed campaign in autonomy mode "auto" runs end-to-end with no manual step: the daily run \
+generates a suggestion, auto-accepts it (skipping only rows flagged REVIEW), and the scheduled push \
+script sends it to Blinkit live - within an authorized per-move CPM tolerance (bid_tolerance_pct, \
+e.g. 20%). "semi_auto" (the default) means suggestions still need a human accept/override on the \
+On-Demand AI or Pending Actions page. Use get_automation_status to check a campaign's mode.
+- ROAS Impact and Before/After now score against voylla.blinkit_ondemand_actions, not the old table. \
+Their "was_implemented"/verdict logic requires an actual live push (push_status = 'done' from the \
+independent Blinkit_Ondemand_Bid_Push.ipynb), which stays in DRY_RUN until a human turns it off - so \
+until then, expect verdicts to be empty/NULL for everything. That's correct, not a bug: nothing has \
+actually gone live yet, so there is nothing to honestly attribute a ROAS change to.
 """
 
 TOOLS = [
@@ -99,16 +101,18 @@ TOOLS = [
     {
         "name": "get_pending_actions_summary",
         "description": (
-            "Today's (or a given date's) AI recommendations for a brand: counts by action type "
-            "(NO_CHANGE/INCREASE_CPM/DECREASE_CPM/PAUSE/ZOMBIE_FLAG/etc.), counts by review status "
-            "(accepted/rejected/undecided/overridden), and a few sample explanations. Use for "
-            "'what did the agent recommend', 'how many pauses', 'what's still undecided'."
+            "Pending Actions page: recent AI recommendations for a brand (on-demand engine, same "
+            "table get_ondemand_suggestions reads - Blinkit_actions_llm is fully retired from this "
+            "surface). Counts by action type (NO_CHANGE/INCREASE_CPM/DECREASE_CPM/PAUSE/"
+            "ZOMBIE_FLAG/etc.), counts by review status (accepted/rejected/undecided/overridden), "
+            "and a few sample explanations. Use for 'what did the agent recommend', 'how many "
+            "pauses', 'what's still undecided'."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "brand": {"type": "string"},
-                "action_date": {"type": "string", "description": "YYYY-MM-DD, optional - defaults to the latest"},
+                "action_date": {"type": "string", "description": "YYYY-MM-DD, optional - omit for all recent history"},
                 "action_type": {"type": "string", "description": "Filter to one action, e.g. PAUSE - optional"},
             },
             "required": ["brand"],
@@ -234,7 +238,7 @@ def _cap_rows(rows, n, key=None):
 def _tool_channel_performance(brand, cutover_date=None, window_days=7):
     cutover = date.fromisoformat(cutover_date) if cutover_date else None
     if not cutover:
-        dates = queries.fetch_action_dates(brand)
+        dates = queries.fetch_ondemand_action_dates(brand)
         cutover = date.fromisoformat(dates[0]) if dates else date.today() - timedelta(days=1)
     campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" else None
     daily = queries.fetch_channel_daily(brand, days=90, campaign_ids=campaign_ids)
@@ -256,10 +260,8 @@ def _tool_channel_performance(brand, cutover_date=None, window_days=7):
 def _tool_before_after_keywords(brand, cutover_date=None, pre_days=7, min_spend=60):
     if cutover_date:
         cutover = date.fromisoformat(cutover_date)
-    elif brand == "Chumbak":
-        cutover = queries.CHUMBAK_SHOWCASE_GO_LIVE
     else:
-        cutover = date.today() - timedelta(days=1)
+        cutover = queries.fetch_latest_ondemand_action_date(brand) or (date.today() - timedelta(days=1))
     campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" else None
     rows, summary = queries.fetch_before_after_matrix(
         brand, cutover, pre_days=int(pre_days or 7), min_spend=float(min_spend or 60), campaign_ids=campaign_ids
@@ -274,12 +276,15 @@ def _tool_before_after_keywords(brand, cutover_date=None, pre_days=7, min_spend=
 
 
 def _tool_pending_actions_summary(brand, action_date=None, action_type=None):
-    if not action_date:
-        dates = queries.fetch_action_dates(brand)
-        action_date = dates[0] if dates else None
-    if not action_date:
-        return {"error": "no recommendations found for this brand"}
-    rows = queries.fetch_pending_actions(brand, action_date)
+    """Pending Actions is now on-demand-sourced (voylla.blinkit_ondemand_actions) -
+    Blinkit_actions_llm is fully retired from this surface, so this tool reads the
+    same table get_ondemand_suggestions does. action_date filters to one day;
+    omit it to get the whole recent history, same as the page's default view."""
+    rows = queries.fetch_ondemand_actions(brand)
+    if action_date:
+        rows = [r for r in rows if str(r["action_date"]) == action_date]
+    if not rows and action_date:
+        return {"error": f"no recommendations found for {brand} on {action_date}"}
     if action_type:
         rows = [r for r in rows if r["action"] == action_type]
 
@@ -308,7 +313,8 @@ def _tool_pending_actions_summary(brand, action_date=None, action_type=None):
         for r in rows[:8]
     ]
     return {
-        "action_date": action_date,
+        "action_date_filter": action_date,
+        "most_recent_requested_at": rows[0]["requested_at"] if rows else None,
         "total": len(rows),
         "by_action": action_counts,
         "by_status": dict(status_counts),
