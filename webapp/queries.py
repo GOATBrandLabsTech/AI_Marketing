@@ -274,6 +274,31 @@ def set_autonomy_mode(campaign_id, brand, mode, set_by=None):
         )
 
 
+def set_ondemand_managed_bulk(campaign_ids, brand, managed=True, bid_tolerance_pct=20, set_by=None):
+    """Same as set_ondemand_managed but for many campaigns in one brand at
+    once - used to delink a brand's whole catalog from Blinkit_actions_llm
+    in a single call instead of one round-trip per campaign."""
+    if not campaign_ids:
+        return 0
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO voylla.campaign_autonomy_mode
+                (campaign_id, brand, mode, ondemand_managed, bid_tolerance_pct, set_by, set_at)
+            SELECT unnest(%(campaign_ids)s), %(brand)s, 'semi_auto', %(managed)s, %(tol)s, %(set_by)s, NOW()
+            ON CONFLICT (campaign_id, brand) DO UPDATE
+                SET ondemand_managed = EXCLUDED.ondemand_managed,
+                    bid_tolerance_pct = EXCLUDED.bid_tolerance_pct,
+                    set_by = EXCLUDED.set_by, set_at = NOW()
+            """,
+            {
+                "campaign_ids": [str(c) for c in campaign_ids], "brand": brand,
+                "managed": bool(managed), "tol": bid_tolerance_pct, "set_by": set_by,
+            },
+        )
+        return cur.rowcount
+
+
 def set_ondemand_managed(campaign_id, brand, managed, bid_tolerance_pct=20, set_by=None):
     """Turns full on-demand management on/off for one campaign. Does NOT
     touch `mode` - a caller that wants the "auto button" behaviour (auto

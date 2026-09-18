@@ -2306,12 +2306,16 @@ def generate_daily_suggestions_for_brand(brand, campaign_ids=None, requested_by=
     """
     Loops generate_ondemand_suggestions() over every on-demand-managed
     campaign for a brand (voylla.campaign_autonomy_mode.ondemand_managed =
-    true), or a caller-supplied list. Deliberately NOT "every active
-    campaign" - this pipeline only ever touches campaigns explicitly opted
-    in (see the Campaigns & Budget / On-Demand AI pages), so turning this on
-    can never silently start generating LLM suggestions for the whole
-    brand's catalog. Never raises - a failed campaign is recorded and the
-    loop continues, so one bad campaign can't take down the whole daily run.
+    true) that ALSO has real spend in the last 7 days, or a caller-supplied
+    list. The spend filter matters even when every campaign in the catalog
+    is marked managed: a campaign with zero recent spend has nothing for
+    the rule engine to reason about (a wasted LLM call), and - more
+    importantly - it's usually dormant/stopped on purpose, so never even
+    generating a suggestion for it means the push script can never be
+    handed an INCREASE/DECREASE for a campaign whose RESTART payload would
+    revive something that was deliberately paused. Never raises - a failed
+    campaign is recorded and the loop continues, so one bad campaign can't
+    take down the whole daily run.
 
     Returns {"brand", "campaigns_run", "total_suggestions", "failures": [...]}.
     """
@@ -2319,7 +2323,12 @@ def generate_daily_suggestions_for_brand(brand, campaign_ids=None, requested_by=
     import queries
 
     engine = get_engine()
-    ids = campaign_ids or sorted(queries.fetch_ondemand_managed_ids(brand))
+    if campaign_ids is not None:
+        ids = campaign_ids
+    else:
+        managed = queries.fetch_ondemand_managed_ids(brand)
+        spending = set(fetch_active_campaign_ids(engine, brand))
+        ids = sorted(managed & spending)
     if not ids:
         return {"brand": brand, "campaigns_run": 0, "total_suggestions": 0, "failures": []}
 
