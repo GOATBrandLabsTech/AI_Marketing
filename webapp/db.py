@@ -1,16 +1,17 @@
 import os
 from contextlib import contextmanager
-from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
 
-DEFAULT_CRED_FILE = str(
-    Path.home() / "Documents" / "Python_Scripts" / "Voylla_Cred.txt"
-)
-DEFAULT_ANTHROPIC_KEY_FILE = str(
-    Path.home() / "Documents" / "Python_Scripts" / "Claude_api_key.txt"
-)
+# Hardcoded, not Path.home()-derived: Path.home() reads USERPROFILE, which in
+# some Jupyter kernels on this machine resolves to a different (stale/wrong)
+# profile than the one these files actually live under - the same traditional
+# hardcoded-FL-location convention every other script in this folder already
+# uses, for exactly that reason.
+PYTHON_SCRIPTS_DIR = r"C:\Users\Amit Singh\Documents\Python_Scripts"
+DEFAULT_CRED_FILE = PYTHON_SCRIPTS_DIR + r"\Voylla_Cred.txt"
+DEFAULT_ANTHROPIC_KEY_FILE = PYTHON_SCRIPTS_DIR + r"\Claude_api_key.txt"
 
 
 def _load_cred_file(path):
