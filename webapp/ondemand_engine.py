@@ -2158,7 +2158,7 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
 
     cfg = get_anthropic_config()
     client = anthropic_sdk.Anthropic(api_key=cfg["api_key"])
-    model = cfg.get("model") or "claude-sonnet-4-5"
+    model = cfg.get("model") or "claude-haiku-4-5-20251001"
 
     keyword_pool_records = _fetch_keyword_pool(engine)
     KEYWORD_POOL_BLOCK = {

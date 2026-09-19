@@ -43,7 +43,7 @@ def get_anthropic_config():
     if os.environ.get("ANTHROPIC_API_KEY"):
         return {
             "api_key": os.environ["ANTHROPIC_API_KEY"],
-            "model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+            "model": os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
         }
     key_path = os.environ.get("ANTHROPIC_KEY_FILE", DEFAULT_ANTHROPIC_KEY_FILE)
     with open(key_path, encoding="utf-8") as f:
