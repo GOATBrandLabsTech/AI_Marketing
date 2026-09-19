@@ -13,6 +13,19 @@
     </p>
     {% endif %}
   </div>
+  {% if not chooser and action_dates %}
+  <form method="get" data-soft>
+    <input type="hidden" name="brand" value="{{ brand }}">
+    {% if action_filter %}<input type="hidden" name="action" value="{{ action_filter }}">{% endif %}
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Action date</label>
+    <select name="date" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+      <option value="">All dates</option>
+      {% for d in action_dates %}
+      <option value="{{ d }}" {{ 'selected' if d == date_filter else '' }}>{{ d }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  {% endif %}
 </div>
 
 {% if not chooser %}
@@ -34,14 +47,14 @@
 <div class="mb-6">
   <div class="text-sm font-semibold text-ink mb-3">By action <span class="font-normal" style="color:var(--ink-muted)">&mdash; click to filter</span></div>
   <div class="flex flex-wrap gap-3">
-    <a href="{{ url_for('actions', brand=brand) }}" data-soft
+    <a href="{{ url_for('actions', brand=brand, date=date_filter) }}" data-soft
        class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not action_filter else '' }}">
       <div class="font-display text-xl font-bold text-ink">{{ total_count }}</div>
       <div class="text-xs" style="color:var(--ink-muted)">All</div>
     </a>
     {% for name, count in action_counts.items()|sort(attribute='1', reverse=true) %}
     {% set c = action_colors.get(name, {'bg': '#f2f2f0', 'fg': 'var(--ink-muted)', 'dot': '#d5d4cf'}) %}
-    <a href="{{ url_for('actions', brand=brand, action=name) }}" data-soft
+    <a href="{{ url_for('actions', brand=brand, action=name, date=date_filter) }}" data-soft
        class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px ' ~ c.dot if action_filter == name else '' }}">
       <div class="font-display text-xl font-bold" style="color:{{ c.fg }}">{{ count }}</div>
       <div class="text-xs flex items-center gap-1.5" style="color:var(--ink-muted)"><span class="w-1.5 h-1.5 rounded-full" style="background:{{ c.dot }}"></span>{{ name }}</div>

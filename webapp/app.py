@@ -239,7 +239,12 @@ def actions():
         choices = [{"brand": b, "count": len(queries.fetch_ondemand_actions(b))} for b in queries.fetch_brands()]
         return render_template("actions.html", chooser=choices, active="actions")
 
-    all_rows = queries.fetch_ondemand_actions(brand, limit=500)
+    action_dates = queries.fetch_ondemand_action_dates(brand)
+    date_filter = request.args.get("date") or None
+
+    all_rows = queries.fetch_ondemand_actions(brand, limit=1000)
+    if date_filter:
+        all_rows = [r for r in all_rows if str(r["action_date"]) == date_filter]
     action_counts = Counter(r["action"] for r in all_rows)
     action_filter = request.args.get("action") or None
     rows = [r for r in all_rows if not action_filter or r["action"] == action_filter]
@@ -250,6 +255,8 @@ def actions():
         total_count=len(all_rows),
         action_counts=action_counts,
         action_filter=action_filter,
+        action_dates=action_dates,
+        date_filter=date_filter,
         action_options=queries.ACTION_OPTIONS,
         active="actions",
     )
