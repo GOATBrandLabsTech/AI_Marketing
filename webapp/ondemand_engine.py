@@ -2404,3 +2404,82 @@ def generate_daily_suggestions_for_brand(brand, campaign_ids=None, requested_by=
         "total_suggestions": total,
         "failures": failures,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOTES LINT  (new - weekly maintenance for the shared notes "wiki")
+# ══════════════════════════════════════════════════════════════════════════════
+# A note has no built-in expiry - "Navratri starts Oct 1" is true forever as
+# a sentence, it just stops being RELEVANT once Navratri has passed. Rather
+# than force the user to specify an end date at write time, this asks the
+# LLM once a week: given today's date and everything currently active, what
+# should stop being folded into prompts? Cheap - a handful of notes per
+# brand at most, one small Haiku call, no daily cost.
+
+def lint_notes(brand):
+    """Reviews every active note for a brand and deactivates (still_relevant
+    = False) anything whose event/window has clearly passed or that's
+    superseded by a newer note - never a standing instruction just for being
+    old. Returns {"brand", "reviewed", "deactivated": [{"id","reason"}]}."""
+    import queries
+    from db import get_anthropic_config
+    import anthropic as anthropic_sdk
+
+    notes = queries.fetch_notes(brand, include_stale=False, limit=200)
+    if not notes:
+        return {"brand": brand, "reviewed": 0, "deactivated": []}
+
+    today = datetime.now().date()
+    notes_text = "\n".join(
+        f"id={n['id']} | {n['entity_type']}"
+        f"{(':' + n['entity_id']) if n['entity_id'] else ''} | "
+        f"filed {n['created_at'].date()} | {n['text']}"
+        for n in notes
+    )
+
+    cfg = get_anthropic_config()
+    client = anthropic_sdk.Anthropic(api_key=cfg["api_key"])
+    model = cfg.get("model") or "claude-haiku-4-5-20251001"
+
+    prompt = f"""Today's date: {today}.
+
+Below are active notes for the {brand} Blinkit bidding account - context a
+human gave for future bid decisions (an upcoming event, a standing
+instruction, a correction).
+
+{notes_text}
+
+Identify which notes should be deactivated because:
+- The event/window they describe has clearly passed (e.g. a note about an
+  October festival is stale well after that festival has ended)
+- They are directly contradicted or superseded by a newer note on the same topic
+
+Do NOT deactivate a standing instruction just because it's old - only
+deactivate it if a newer note clearly supersedes it or it names an end date
+that has passed.
+
+Return ONLY a JSON array, one object per note to deactivate:
+[{{"id": 12, "reason": "one short sentence"}}]
+Return an empty array [] if nothing should be deactivated. No other text.
+"""
+
+    resp = client.messages.create(
+        model=model, max_tokens=1000, temperature=0,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = resp.content[0].text
+    try:
+        to_deactivate = extract_json(raw)
+    except Exception:
+        to_deactivate = []
+
+    deactivated = []
+    for item in to_deactivate:
+        try:
+            note_id = int(item["id"])
+            queries.set_note_relevance(note_id, False)
+            deactivated.append({"id": note_id, "reason": item.get("reason", "")})
+        except Exception:
+            continue
+
+    return {"brand": brand, "reviewed": len(notes), "deactivated": deactivated}
