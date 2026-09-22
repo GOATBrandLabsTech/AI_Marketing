@@ -91,3 +91,20 @@ CREATE INDEX IF NOT EXISTS idx_ondemand_campaign
 ALTER TABLE voylla.blinkit_ondemand_actions ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMP;
 ALTER TABLE voylla.blinkit_ondemand_actions ADD COLUMN IF NOT EXISTS push_status TEXT;
 ALTER TABLE voylla.blinkit_ondemand_actions ADD COLUMN IF NOT EXISTS push_note TEXT;
+
+-- Shared "wiki" notes: dynamic context Agent Chat can file and the on-demand
+-- engine reads before every suggestion. entity_type/entity_id is deliberately
+-- loose (no FK) - the LLM decides at write time whether a fact belongs to one
+-- keyword, one campaign, a whole brand, or nothing in particular ('general').
+CREATE TABLE IF NOT EXISTS voylla.notes (
+    id             SERIAL PRIMARY KEY,
+    brand          TEXT NOT NULL,
+    entity_type    TEXT NOT NULL CHECK (entity_type IN ('campaign', 'keyword', 'brand', 'general')),
+    entity_id      TEXT,
+    text           TEXT NOT NULL,
+    source         TEXT NOT NULL DEFAULT 'chat',
+    created_by     TEXT,
+    created_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+    still_relevant BOOLEAN NOT NULL DEFAULT TRUE
+);
+CREATE INDEX IF NOT EXISTS idx_notes_lookup ON voylla.notes(brand, entity_type, entity_id);

@@ -1,11 +1,15 @@
 """
-Agent Chat: a read-only conversational layer over the same data the
-dashboard shows. The LLM only ever gets *read* tools - wrappers around the
-existing queries.py functions - so "chat only, no implementation" is an
-architectural guarantee, not a prompt instruction that a clever question
-could talk around. Conversation history persists in Postgres
-(agent_chat_threads / agent_chat_messages) so a thread survives across
-sessions and becomes part of the same "memory" the rest of the app reads.
+Agent Chat: a mostly-read-only conversational layer over the same data the
+dashboard shows. Almost every tool is a *read* wrapper around queries.py -
+"chat only, no implementation" holds for campaigns, bids, and schedules: no
+tool here can pause a keyword, accept a recommendation, or change a budget.
+The one deliberate exception is file_note, which writes a row to the shared
+"notes" table (voylla.notes) - context (upcoming events, standing
+instructions, corrections) that the on-demand suggestion engine reads back
+before every future decision. It never touches campaigns/bids directly; it
+only remembers something for the *next* suggestion to consider.
+Conversation history persists in Postgres (agent_chat_threads /
+agent_chat_messages) so a thread survives across sessions.
 """
 import json
 import uuid
@@ -24,12 +28,21 @@ its sister brands (Chumbak, Petcrux) on the Blinkit ads platform. You help the m
 understand what the AI bid-agent has done, why, and how well it is working.
 
 Ground rules - follow these strictly:
-- You are READ-ONLY. You cannot pause a keyword, accept or override a recommendation, change a \
-bid, or modify a schedule or budget, and you have no tool that does any of those things. If asked \
-to take an action, say plainly that you can't do it from chat, and point to the right page \
+- You cannot pause a keyword, accept or override a recommendation, change a bid, or modify a \
+schedule or budget, and you have no tool that does any of those things. If asked to take an \
+action like that, say plainly that you can't do it from chat, and point to the right page \
 (Pending Actions to accept/override a recommendation, Campaigns & Budget to manage schedule \
 windows) - then, if useful, say what you'd do in their position and why, as advice, not as a \
 thing you're about to execute.
+- The one thing you CAN write is a note (file_note) - a piece of context that should inform \
+future AI bid suggestions: an upcoming event, a standing instruction ("leave X alone for two \
+weeks"), a correction. Use it whenever the user tells you something like that - don't just \
+acknowledge it in the chat and let it evaporate. Pick entity_type/entity_id based on what the \
+note is actually about (a specific campaign, a keyword across campaigns, the whole brand, or \
+'general' for something with no natural entity) - don't default to one type. After filing, tell \
+the user what you filed and where, so they can correct you if you guessed the scope wrong. This \
+never touches a campaign, bid, or schedule directly - it only shapes what the suggestion engine \
+sees next time it runs for that entity.
 - Always use a tool to fetch real data before answering a question about performance, campaigns, \
 spend, or past decisions. Never invent or estimate a number that a tool could have given you.
 - Be concise and specific - cite the actual figures a tool returned (spend, ROAS, counts, dates) \
@@ -186,6 +199,54 @@ TOOLS = [
             "properties": {
                 "brand": {"type": "string"},
                 "search": {"type": "string", "description": "Campaign name substring to filter to, optional - not a numeric ID"},
+            },
+            "required": ["brand"],
+        },
+    },
+    {
+        "name": "file_note",
+        "description": (
+            "The only write action you have. Saves a piece of context - an upcoming event, a "
+            "standing instruction, a correction - that the on-demand suggestion engine will read "
+            "before every future decision for the entity you attach it to. Use whenever the user "
+            "tells you something that should shape future bidding, not just this conversation. "
+            "Does NOT touch any campaign, bid, or schedule - it only files a note for later."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string"},
+                "entity_type": {
+                    "type": "string",
+                    "enum": ["campaign", "keyword", "brand", "general"],
+                    "description": (
+                        "What the note is about. 'campaign': one specific campaign_id. 'keyword': "
+                        "a keyword name, applies wherever it appears for this brand (not one "
+                        "campaign). 'brand': applies to everything in this brand. 'general': no "
+                        "natural entity, applies broadly."
+                    ),
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "The campaign_id or keyword name this note is about. Omit for entity_type brand/general.",
+                },
+                "text": {"type": "string", "description": "The note itself, written plainly - this gets pasted into future prompts verbatim."},
+            },
+            "required": ["brand", "entity_type", "text"],
+        },
+    },
+    {
+        "name": "get_notes",
+        "description": (
+            "Lists notes filed for a brand (via file_note or elsewhere) - what's currently active "
+            "and shaping future suggestions. Use for 'what notes do we have', 'did I already tell "
+            "you about X', 'what's still relevant'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string"},
+                "include_stale": {"type": "boolean", "description": "Include notes marked no-longer-relevant too, default false"},
             },
             "required": ["brand"],
         },
@@ -437,6 +498,32 @@ def _tool_automation_status(brand, search=None):
     }
 
 
+def _tool_file_note(brand, entity_type, text, entity_id=None):
+    if entity_type in ("campaign", "keyword") and not entity_id:
+        return {"error": f"entity_type '{entity_type}' requires entity_id"}
+    note_id = queries.file_note(brand, entity_type, text, entity_id=entity_id, source="chat")
+    return {
+        "ok": True,
+        "note_id": note_id,
+        "filed_as": f"{entity_type}" + (f":{entity_id}" if entity_id else ""),
+        "text": text,
+    }
+
+
+def _tool_get_notes(brand, include_stale=False):
+    rows = queries.fetch_notes(brand, include_stale=bool(include_stale))
+    return {
+        "total": len(rows),
+        "notes": [
+            {
+                "id": r["id"], "entity_type": r["entity_type"], "entity_id": r["entity_id"],
+                "text": r["text"], "created_at": r["created_at"], "still_relevant": r["still_relevant"],
+            }
+            for r in rows
+        ],
+    }
+
+
 TOOL_FUNCTIONS = {
     "get_channel_performance": _tool_channel_performance,
     "get_before_after_keywords": _tool_before_after_keywords,
@@ -445,6 +532,8 @@ TOOL_FUNCTIONS = {
     "get_recommendation_impact": _tool_recommendation_impact,
     "get_ondemand_suggestions": _tool_ondemand_suggestions,
     "get_automation_status": _tool_automation_status,
+    "file_note": _tool_file_note,
+    "get_notes": _tool_get_notes,
 }
 
 

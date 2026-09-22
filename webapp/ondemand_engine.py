@@ -2153,6 +2153,14 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
         row["previous_summary"] = (
             prev["previous_summary"] + (f" | OUTCOME: {outcome}" if outcome else "")
         )
+        # Shared notes "wiki" - anything filed via Agent Chat (or elsewhere)
+        # against this keyword, this campaign, or the whole brand. Dynamic:
+        # a note doesn't have to be about this exact keyword to show up here.
+        import queries as _queries
+        notes = _queries.fetch_relevant_notes(brand, campaign_id=campaign_id, targeting=targeting_key)
+        if notes:
+            notes_text = " | ".join(f"NOTE ({n['entity_type']}): {n['text']}" for n in notes)
+            row["previous_summary"] += f" | {notes_text}"
         row["previous_history"] = prev["previous_history"]
         inject_python_flags(row)
 
@@ -2225,6 +2233,12 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
            different this cycle. If it says MET, that's confirmation the reasoning that led
            to it was sound — lean on the same logic again unless the numbers have moved. If
            it's "too recent to grade", ignore it and decide on the current data alone.
+        -> If previous_summary contains one or more "| NOTE (type): ..." entries, those are
+           context a human filed - an upcoming event, a standing instruction, a correction -
+           not a computed fact. A NOTE (keyword)/(campaign) is specific to this exact row; a
+           NOTE (brand)/(general) applies more broadly and may be less directly relevant to
+           this specific keyword. Weigh notes alongside the numbers, don't let them override
+           a clear numeric signal, and if you act on one say so explicitly in the explanation.
 
         CURRENT DATA (7-day aggregated with 15-day and 30-day ROAS and spend):
         {json.dumps(clean_nan(data_for_llm))}

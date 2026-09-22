@@ -1088,6 +1088,93 @@ def bulk_accept_ondemand_actions(unique_keys, brand):
         return cur.rowcount
 
 
+NOTE_ENTITY_TYPES = ("campaign", "keyword", "brand", "general")
+
+
+def file_note(brand, entity_type, text, entity_id=None, source="chat", created_by=None):
+    """Writes one row to the shared notes 'wiki' - the only write path Agent
+    Chat has. entity_type/entity_id say what the note is about: a specific
+    campaign_id, a keyword (brand-wide, not tied to one campaign), the whole
+    brand, or 'general' (entity_id ignored) for something with no natural
+    entity at all."""
+    if entity_type not in NOTE_ENTITY_TYPES:
+        raise ValueError(f"entity_type must be one of {NOTE_ENTITY_TYPES}")
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO voylla.notes (brand, entity_type, entity_id, text, source, created_by)
+            VALUES (%(brand)s, %(entity_type)s, %(entity_id)s, %(text)s, %(source)s, %(created_by)s)
+            RETURNING id
+            """,
+            {
+                "brand": brand, "entity_type": entity_type,
+                "entity_id": str(entity_id) if entity_id is not None else None,
+                "text": text, "source": source, "created_by": created_by,
+            },
+        )
+        return cur.fetchone()["id"]
+
+
+def fetch_relevant_notes(brand, campaign_id=None, targeting=None, limit=20):
+    """Notes that should inform a decision about this specific keyword: any
+    still-relevant brand-wide/general note, plus anything filed against this
+    exact campaign_id or this exact keyword. Used both by the suggestion
+    engine (folded into the prompt) and reusable anywhere else that needs
+    'what do we know about this'."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, entity_type, entity_id, text, source, created_at
+            FROM voylla.notes
+            WHERE still_relevant = TRUE
+              AND brand = %(brand)s
+              AND (
+                    entity_type IN ('brand', 'general')
+                    OR (entity_type = 'campaign' AND entity_id = %(campaign_id)s)
+                    OR (entity_type = 'keyword'  AND entity_id = %(targeting)s)
+              )
+            ORDER BY created_at DESC
+            LIMIT %(limit)s
+            """,
+            {
+                "brand": brand,
+                "campaign_id": str(campaign_id) if campaign_id is not None else None,
+                "targeting": targeting,
+                "limit": limit,
+            },
+        )
+        return cur.fetchall()
+
+
+def fetch_notes(brand, include_stale=False, limit=100):
+    """All notes for a brand, most recent first - for Agent Chat to answer
+    'what notes do we have' and as a manual lint view (old + still_relevant
+    rows are the ones worth reviewing)."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, entity_type, entity_id, text, source, created_at, still_relevant
+            FROM voylla.notes
+            WHERE brand = %(brand)s {relevance_filter}
+            ORDER BY created_at DESC
+            LIMIT %(limit)s
+            """.format(relevance_filter="" if include_stale else "AND still_relevant = TRUE"),
+            {"brand": brand, "limit": limit},
+        )
+        return cur.fetchall()
+
+
+def set_note_relevance(note_id, still_relevant):
+    """Lint action: mark a note stale (still_relevant=False) once it no
+    longer applies, so it stops being folded into future prompts."""
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.notes SET still_relevant = %(v)s WHERE id = %(id)s",
+            {"v": still_relevant, "id": note_id},
+        )
+        return cur.rowcount
+
+
 def override_ondemand_action(unique_key, brand, override_action_value, cpm_change_user, note):
     with get_cursor(commit=True) as cur:
         cur.execute(
