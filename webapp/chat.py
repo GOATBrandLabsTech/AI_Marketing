@@ -116,8 +116,8 @@ TOOLS = [
         "description": (
             "Pending Actions page: recent AI recommendations for a brand (on-demand engine, same "
             "table get_ondemand_suggestions reads - Blinkit_actions_llm is fully retired from this "
-            "surface). Counts by action type (NO_CHANGE/INCREASE_CPM/DECREASE_CPM/PAUSE/"
-            "ZOMBIE_FLAG/etc.), counts by review status (accepted/rejected/undecided/overridden), "
+            "surface). Counts by action type (NO_CHANGE/INCREASE_CPM/DECREASE_CPM/PAUSE), "
+            "counts by review status (accepted/rejected/undecided/overridden), "
             "and a few sample explanations. Use for 'what did the agent recommend', 'how many "
             "pauses', 'what's still undecided'."
         ),

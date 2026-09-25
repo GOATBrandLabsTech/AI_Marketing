@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}On-Demand AI - Blinkit Control{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-7">
+<div class="flex items-center justify-between mb-7 flex-wrap gap-3">
   <div>
     <h1 class="page-title text-2xl font-bold text-ink">On-Demand AI Suggestions</h1>
     {% if chooser %}
@@ -13,12 +13,19 @@
     </p>
     {% endif %}
   </div>
+  <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
+    {% for ch in channels %}
+    <a href="{{ url_for('ondemand', brand=brand, channel=ch) }}" data-soft
+       class="text-xs font-semibold px-3.5 py-2 transition"
+       style="{{ 'background:var(--brand);color:#fff;' if ch == channel else 'color:var(--ink-2);' }}">{{ ch }}</a>
+    {% endfor %}
+  </div>
 </div>
 
 {% if chooser %}
 <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
   {% for c in chooser %}
-  <a href="{{ url_for('ondemand', brand=c.brand) }}" data-soft class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
+  <a href="{{ url_for('ondemand', brand=c.brand, channel=channel) }}" data-soft class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
     <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">{{ c.brand }}</div>
   </a>
   {% endfor %}
@@ -30,17 +37,18 @@
   <div class="flex items-center justify-between flex-wrap gap-3">
     <div>
       <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">Full automation - {{ automation.campaign_name or ('#' ~ campaign_filter) }}</div>
+      {% set legacy_table = 'Instamart_actions_llm' if channel == 'Instamart' else 'Blinkit_actions_llm' %}
       {% if automation.mode == 'auto' %}
       <p class="text-sm" style="color:var(--good)">
-        <strong>ON.</strong> This campaign is delinked from Blinkit_actions_llm - suggestions come only from this on-demand engine.
+        <strong>ON.</strong> This campaign is delinked from {{ legacy_table }} - suggestions come only from this on-demand engine.
         The daily run auto-accepts INCREASE_CPM / DECREASE_CPM / PAUSE (never a REVIEW-flagged row), capped to &plusmn;{{ automation.bid_tolerance_pct|int }}% per move, for the scheduled push script to send live.
       </p>
       {% elif automation.ondemand_managed %}
       <p class="text-sm" style="color:var(--ink-2)">
-        Delinked from Blinkit_actions_llm - suggestions here are the only ones for this campaign. Autonomy mode is <strong>semi_auto</strong>: you still accept/override each row yourself below. Flip to Auto to remove that manual step.
+        Delinked from {{ legacy_table }} - suggestions here are the only ones for this campaign. Autonomy mode is <strong>semi_auto</strong>: you still accept/override each row yourself below. Flip to Auto to remove that manual step.
       </p>
       {% else %}
-      <p class="text-sm" style="color:var(--ink-2)">Not yet on-demand-managed - turning this on delinks the campaign from Blinkit_actions_llm and, in Auto, removes the manual accept step entirely.</p>
+      <p class="text-sm" style="color:var(--ink-2)">Not yet on-demand-managed - turning this on delinks the campaign from {{ legacy_table }} and, in Auto, removes the manual accept step entirely.</p>
       {% endif %}
     </div>
     <button id="autoBtn" onclick="toggleAutomation()" class="text-white text-sm font-semibold rounded-lg px-4 py-2.5 transition"
@@ -73,7 +81,7 @@
 
 <div class="mb-4 flex items-center gap-3">
   {% if campaign_filter %}
-  <a href="{{ url_for('ondemand', brand=brand) }}" data-soft class="text-xs font-semibold px-3 py-2 rounded-lg border transition" style="border-color:var(--ring); color:var(--ink-2)">&larr; All campaigns</a>
+  <a href="{{ url_for('ondemand', brand=brand, channel=channel) }}" data-soft class="text-xs font-semibold px-3 py-2 rounded-lg border transition" style="border-color:var(--ring); color:var(--ink-2)">&larr; All campaigns</a>
   <span class="text-sm" style="color:var(--ink-2)">Filtered to campaign #{{ campaign_filter }}</span>
   {% else %}
   <span class="text-sm" style="color:var(--ink-muted)">{{ rows|length }} recent suggestion(s), all campaigns</span>
@@ -100,7 +108,7 @@
         <tr class="border-b" style="border-color:var(--grid)">
           <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.requested_at }}</td>
           <td class="px-4 py-2.5 font-medium">{{ r.campaign_name }}</td>
-          <td class="px-4 py-2.5">{{ r.targeting }}</td>
+          <td class="px-4 py-2.5">{{ r.targeting }}{% if r.match_type %} <span class="text-xs" style="color:var(--ink-muted)">({{ r.match_type|replace('KEYWORD_MATCH_TYPE_', '')|lower }})</span>{% endif %}</td>
           <td class="px-4 py-2.5 whitespace-nowrap">
             {{ r.action }}
             {% if r.rule_action and r.rule_action != '' and r.rule_action != r.action %}
@@ -176,6 +184,7 @@
 {% block scripts %}
 <script>
 var BRAND = {{ brand|tojson }}; // var, not const: this script re-runs on every soft-nav
+var CHANNEL = {{ channel|tojson }};
 
 async function generateNow() {
   const campaignId = document.getElementById('genCampaignId').value;
@@ -194,7 +203,7 @@ async function generateNow() {
     const res = await fetch('/api/ondemand/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ brand: BRAND, campaign_id: campaignId }),
+      body: JSON.stringify({ brand: BRAND, channel: CHANNEL, campaign_id: campaignId }),
     });
     const data = await res.json();
     if (data.ok) {
@@ -236,7 +245,7 @@ async function submitAccept(key) {
   const cpm = document.getElementById('accept-cpm-' + key).value;
   const note = document.getElementById('accept-note-' + key).value;
   await postJSON(`/api/ondemand/${encodeURIComponent(key)}/accept`, {
-    brand: BRAND, accept, cpm_llm_override: cpm === '' ? null : Number(cpm), note,
+    brand: BRAND, channel: CHANNEL, accept, cpm_llm_override: cpm === '' ? null : Number(cpm), note,
   });
   toast('Saved', true);
   setTimeout(() => location.reload(), 600);
@@ -247,7 +256,7 @@ async function submitOverride(key) {
   const cpm = document.getElementById('override-cpm-' + key).value;
   const note = document.getElementById('override-note-' + key).value;
   await postJSON(`/api/ondemand/${encodeURIComponent(key)}/override`, {
-    brand: BRAND, override_action: action, cpm_change_user: cpm === '' ? null : Number(cpm), note,
+    brand: BRAND, channel: CHANNEL, override_action: action, cpm_change_user: cpm === '' ? null : Number(cpm), note,
   });
   toast('Override saved', true);
   setTimeout(() => location.reload(), 600);

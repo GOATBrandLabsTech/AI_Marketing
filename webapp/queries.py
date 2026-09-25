@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timedelta
 
 from db import get_cursor
 
-ACTION_OPTIONS = ["NO_CHANGE", "INCREASE_CPM", "DECREASE_CPM", "PAUSE", "ZOMBIE_FLAG"]
+ACTION_OPTIONS = ["NO_CHANGE", "INCREASE_CPM", "DECREASE_CPM", "PAUSE"]
 
 ALL_BRANDS = "__ALL__"
 
@@ -1043,6 +1043,125 @@ def accept_ondemand_action(unique_key, brand, accept, cpm_llm_override, note):
             },
         )
         return cur.rowcount
+
+
+def accept_instamart_ondemand_action(unique_key, brand, accept, cpm_llm_override, note):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.instamart_ondemand_actions "
+            "SET user_implemented = %(accept)s, "
+            "    cpm_llm_override = %(cpm)s, "
+            "    override_note = %(note)s, "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = %(unique_key)s AND "Brand" = %(brand)s',
+            {
+                "accept": "true" if accept else "false",
+                "cpm": cpm_llm_override,
+                "note": note,
+                "unique_key": unique_key,
+                "brand": brand,
+            },
+        )
+        return cur.rowcount
+
+
+def fetch_instamart_ondemand_action_dates(brand, limit=30):
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT action_date FROM voylla.instamart_ondemand_actions "
+            'WHERE "Brand" = %(brand)s ORDER BY action_date DESC LIMIT %(limit)s',
+            {"brand": brand, "limit": limit},
+        )
+        return [str(r["action_date"]) for r in cur.fetchall()]
+
+
+INSTAMART_CAMPAIGN_STATUS_SQL = """
+SELECT "CAMPAIGN_ID"::TEXT AS campaign_id,
+       MAX("CAMPAIGN_NAME")   AS campaign_name,
+       "Brand"                AS brand,
+       MAX("TOTAL_BUDGET")    AS budget,
+       MAX("CAMPAIGN_STATUS") AS last_status,
+       0                      AS window_count,
+       NULL::date             AS next_start,
+       NULL::date             AS last_end
+FROM voylla."Instamart_Campaign_Placement"
+WHERE (%(brand)s = '__ALL__' OR "Brand" = %(brand)s)
+  AND "Date"::date >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY "CAMPAIGN_ID", "Brand"
+ORDER BY campaign_name
+"""
+
+
+def fetch_instamart_campaign_status(brand):
+    """Instamart has no Blinkit_Campaign_Runtime-style live status feed yet,
+    so this is a simpler campaign list off the last 30 days of placement
+    data - same output shape as fetch_campaign_status() so the dashboard
+    templates don't need to know which channel they're rendering."""
+    with get_cursor() as cur:
+        cur.execute(INSTAMART_CAMPAIGN_STATUS_SQL, {"brand": brand})
+        rows = cur.fetchall()
+    settings = fetch_autonomy_settings(brand)
+    for r in rows:
+        s = settings.get(str(r["campaign_id"]))
+        r["autonomy_mode"] = s["mode"] if s else "semi_auto"
+        r["ondemand_managed"] = s["ondemand_managed"] if s else False
+        r["bid_tolerance_pct"] = s["bid_tolerance_pct"] if s else 20
+    return rows
+
+
+def bulk_accept_instamart_ondemand_actions(unique_keys, brand):
+    if not unique_keys:
+        return 0
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.instamart_ondemand_actions "
+            "SET user_implemented = 'true', "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = ANY(%(unique_keys)s) AND "Brand" = %(brand)s',
+            {"unique_keys": list(unique_keys), "brand": brand},
+        )
+        return cur.rowcount
+
+
+def override_instamart_ondemand_action(unique_key, brand, override_action_value, cpm_change_user, note):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.instamart_ondemand_actions "
+            "SET user_implemented = 'false', "
+            "    override_action = %(override_action)s, "
+            "    cpm_change_user = %(cpm)s, "
+            "    override_note = %(note)s, "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = %(unique_key)s AND "Brand" = %(brand)s',
+            {
+                "override_action": override_action_value,
+                "cpm": cpm_change_user,
+                "note": note,
+                "unique_key": unique_key,
+                "brand": brand,
+            },
+        )
+        return cur.rowcount
+
+
+def fetch_instamart_ondemand_actions(brand, campaign_id=None, limit=300):
+    """Rows from the Instamart on-demand replica table."""
+    with get_cursor() as cur:
+        if campaign_id:
+            cur.execute(
+                'SELECT * FROM voylla.instamart_ondemand_actions '
+                'WHERE "Brand" = %(brand)s AND campaign_id = %(campaign_id)s '
+                "ORDER BY requested_at DESC, unique_key LIMIT %(limit)s",
+                {"brand": brand, "campaign_id": str(campaign_id), "limit": limit},
+            )
+        else:
+            cur.execute(
+                'SELECT * FROM voylla.instamart_ondemand_actions '
+                'WHERE "Brand" = %(brand)s '
+                "ORDER BY requested_at DESC, unique_key LIMIT %(limit)s",
+                {"brand": brand, "limit": limit},
+            )
+        return cur.fetchall()
 
 
 AUTO_ACCEPT_ACTIONS = {"INCREASE_CPM", "DECREASE_CPM", "PAUSE"}

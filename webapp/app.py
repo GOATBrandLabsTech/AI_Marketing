@@ -46,6 +46,14 @@ def current_brand():
     return request.args.get("brand") or session.get("brand") or "Chumbak"
 
 
+CHANNELS = ["Blinkit", "Instamart"]
+
+
+def current_channel():
+    ch = request.args.get("channel") or session.get("channel") or "Blinkit"
+    return ch if ch in CHANNELS else "Blinkit"
+
+
 @app.template_filter("steps")
 def split_steps(text):
     """The LLM explanation is one long '||'-joined string, one segment per
@@ -81,6 +89,8 @@ def inject_globals():
         "brands": brands,
         "brand": current_brand(),
         "ALL_BRANDS": queries.ALL_BRANDS,
+        "channel": current_channel(),
+        "channels": CHANNELS,
     }
 
 
@@ -234,15 +244,20 @@ def actions():
     the On-Demand AI page's default view."""
     brand = current_brand()
     session["brand"] = brand
+    channel = current_channel()
+    session["channel"] = channel
+
+    fetch_actions_fn = queries.fetch_instamart_ondemand_actions if channel == "Instamart" else queries.fetch_ondemand_actions
+    fetch_dates_fn = queries.fetch_instamart_ondemand_action_dates if channel == "Instamart" else queries.fetch_ondemand_action_dates
 
     if brand == queries.ALL_BRANDS:
-        choices = [{"brand": b, "count": len(queries.fetch_ondemand_actions(b))} for b in queries.fetch_brands()]
-        return render_template("actions.html", chooser=choices, active="actions")
+        choices = [{"brand": b, "count": len(fetch_actions_fn(b))} for b in queries.fetch_brands()]
+        return render_template("actions.html", chooser=choices, active="actions", channel=channel, channels=CHANNELS)
 
-    action_dates = queries.fetch_ondemand_action_dates(brand)
+    action_dates = fetch_dates_fn(brand)
     date_filter = request.args.get("date") or None
 
-    all_rows = queries.fetch_ondemand_actions(brand, limit=1000)
+    all_rows = fetch_actions_fn(brand, limit=1000)
     if date_filter:
         all_rows = [r for r in all_rows if str(r["action_date"]) == date_filter]
     action_counts = Counter(r["action"] for r in all_rows)
@@ -257,6 +272,8 @@ def actions():
         action_filter=action_filter,
         action_dates=action_dates,
         date_filter=date_filter,
+        channel=channel,
+        channels=CHANNELS,
         action_options=queries.ACTION_OPTIONS,
         active="actions",
     )
@@ -266,7 +283,9 @@ def actions():
 @login_required
 def api_ondemand_bulk_accept():
     payload = request.get_json(force=True) or {}
-    n = queries.bulk_accept_ondemand_actions(payload.get("unique_keys", []), payload.get("brand", current_brand()))
+    channel = payload.get("channel", current_channel())
+    bulk_fn = queries.bulk_accept_instamart_ondemand_actions if channel == "Instamart" else queries.bulk_accept_ondemand_actions
+    n = bulk_fn(payload.get("unique_keys", []), payload.get("brand", current_brand()))
     return jsonify({"ok": True, "count": n})
 
 
@@ -365,13 +384,20 @@ def api_override_action(unique_key):
 def ondemand():
     brand = current_brand()
     session["brand"] = brand
+    channel = current_channel()
+    session["channel"] = channel
 
     if brand == queries.ALL_BRANDS:
-        return render_template("ondemand.html", chooser=queries.fetch_brands(), active="ondemand")
+        return render_template("ondemand.html", chooser=queries.fetch_brands(), active="ondemand",
+                                channel=channel, channels=CHANNELS)
 
     campaign_filter = request.args.get("campaign_id") or None
-    campaigns = queries.fetch_campaign_status(brand)
-    rows = queries.fetch_ondemand_actions(brand, campaign_id=campaign_filter)
+    if channel == "Instamart":
+        campaigns = queries.fetch_instamart_campaign_status(brand)
+        rows = queries.fetch_instamart_ondemand_actions(brand, campaign_id=campaign_filter)
+    else:
+        campaigns = queries.fetch_campaign_status(brand)
+        rows = queries.fetch_ondemand_actions(brand, campaign_id=campaign_filter)
     campaign_label_map = {
         f"{c['campaign_name']} (#{c['campaign_id']})": str(c["campaign_id"]) for c in campaigns
     }
@@ -388,6 +414,8 @@ def ondemand():
         campaign_filter=campaign_filter,
         automation=automation,
         action_options=queries.ACTION_OPTIONS,
+        channel=channel,
+        channels=CHANNELS,
         active="ondemand",
     )
 
@@ -415,13 +443,17 @@ def api_ondemand_generate():
     payload = request.get_json(force=True) or {}
     campaign_id = payload.get("campaign_id")
     brand = payload.get("brand", current_brand())
+    channel = payload.get("channel", current_channel())
     if not campaign_id:
         return jsonify({"ok": False, "error": "campaign_id is required"}), 400
 
-    import ondemand_engine
+    if channel == "Instamart":
+        import instamart_engine as engine_module
+    else:
+        import ondemand_engine as engine_module
 
     try:
-        result = ondemand_engine.generate_ondemand_suggestions(brand, campaign_id, requested_by="dashboard")
+        result = engine_module.generate_ondemand_suggestions(brand, campaign_id, requested_by="dashboard")
     except Exception as exc:
         app.logger.exception("on-demand generation failed")
         return jsonify({"ok": False, "count": 0, "rows": [], "error": f"{type(exc).__name__}: {exc}"}), 500
@@ -432,7 +464,9 @@ def api_ondemand_generate():
 @login_required
 def api_ondemand_accept(unique_key):
     payload = request.get_json(force=True) or {}
-    queries.accept_ondemand_action(
+    channel = payload.get("channel", current_channel())
+    accept_fn = queries.accept_instamart_ondemand_action if channel == "Instamart" else queries.accept_ondemand_action
+    accept_fn(
         unique_key,
         payload.get("brand", current_brand()),
         bool(payload.get("accept")),
@@ -446,7 +480,9 @@ def api_ondemand_accept(unique_key):
 @login_required
 def api_ondemand_override(unique_key):
     payload = request.get_json(force=True) or {}
-    queries.override_ondemand_action(
+    channel = payload.get("channel", current_channel())
+    override_fn = queries.override_instamart_ondemand_action if channel == "Instamart" else queries.override_ondemand_action
+    override_fn(
         unique_key,
         payload.get("brand", current_brand()),
         payload.get("override_action"),

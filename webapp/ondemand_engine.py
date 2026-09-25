@@ -504,10 +504,8 @@ def blinkit_tier3_decision(row):
 
     # ── Poor-ROI, position < 5 (Point 2) ──────────────────────────────────────
     if pos < 5 and roi <= poor_cut:
-        if stier == "MAIN":
-            return ("ZOMBIE_FLAG", 0, "STEP 2 · Tier-3 Poor-ROI Matrix · Main · pos<5 · ROI<=3 -> ZOMBIE")
-        if stier == "MODERATE":
-            return ("PAUSE", 0, "STEP 2 · Tier-3 Poor-ROI Matrix · Moderate · pos<5 · ROI<=2 -> PAUSE")
+        if stier in ("MAIN", "MODERATE"):
+            return ("PAUSE", 0, f"STEP 2 · Tier-3 Poor-ROI Matrix · {stier.title()} · pos<5 · ROI<={poor_cut:.0f} -> PAUSE")
         if stier == "LOW":
             # Confirmed #5: recheck 1 cycle then pause (handled via cross-run state)
             return ("NO_CHANGE_RECHECK", 0, "STEP 2 · Tier-3 Poor-ROI Matrix · Low · pos<5 · ROI<=2 -> NO_CHANGE (recheck 1 cycle)")
@@ -528,7 +526,7 @@ def blinkit_tier3_decision(row):
 
 
 # ── POINT 5 — Tier 1/2, position 1–3 (7-day data) ─────────────────────────────
-# Confirmed #7: CPM at base + ROI<=2 -> ZOMBIE (Main/Moderate) / PAUSE (Low/Dead).
+# Confirmed #7: CPM at base + ROI<=2 -> PAUSE.
 def blinkit_point5_decision(row):
     """Position 1–3 CPM rules. Returns (action, cpm_change_pct, reason_tag)."""
     stier = row.get("search_volume_tier", "UNKNOWN")
@@ -540,9 +538,7 @@ def blinkit_point5_decision(row):
 
     # "CPM at base + ROI <= 2" takes precedence (Confirmed #7)
     if at_base and roi <= 2.0:
-        if stier in ("MAIN", "MODERATE"):
-            return ("ZOMBIE_FLAG", 0, "STEP 5 · Position 1-3 CPM Rules · CPM at base · ROI<=2 -> ZOMBIE (Main/Moderate)")
-        return ("PAUSE", 0, "STEP 5 · Position 1-3 CPM Rules · CPM at base · ROI<=2 -> PAUSE (Low/Dead)")
+        return ("PAUSE", 0, "STEP 5 · Position 1-3 CPM Rules · CPM at base · ROI<=2 -> PAUSE")
 
     if cpm > 200 and roi <= 3.0:
         return ("DECREASE_CPM", 12, "STEP 5 · Position 1-3 CPM Rules · CPM>200 · ROI<=3 -> DECREASE 10-15% (min=base)")
@@ -785,7 +781,7 @@ SYSTEM_PROMPT = """
     ═══════════════════════════════════════════════════════════════
     The Python RULE DECISION (rule_action) is the signed-off v3 policy. Treat it as
     your STRONG DEFAULT in BOTH directions — upward (INCREASE) and downward
-    (DECREASE / PAUSE / ZOMBIE_FLAG) carry equal weight. The rules were built by the
+    (DECREASE / PAUSE) carry equal weight. The rules were built by the
     marketing team specifically to cut wasted spend, so downward actions are
     first-class outcomes, NOT last resorts.
 
@@ -795,9 +791,9 @@ SYSTEM_PROMPT = """
 
     2. Downward actions are normal and expected:
        - DECREASE_CPM when the rule says CPM is high for the ROI delivered.
-       - PAUSE when the rule says a low/dead-tier keyword with poor ROI is bleeding.
-       - ZOMBIE_FLAG when the rule flags a high-CPM keyword with near-zero traffic
-         for human review. Passing it back as NO_CHANGE hides the problem — don't.
+       - PAUSE when the rule says a poor-ROI or near-zero-traffic keyword,
+         low/dead-tier or not, is bleeding. Passing it back as NO_CHANGE hides
+         the problem — don't.
 
     3. Historical ROAS is context, not a shield. A strong 30-day ROAS can justify
        holding through a weak week — but it does NOT automatically cancel a rule cut.
@@ -840,7 +836,7 @@ SYSTEM_PROMPT = """
     ── TIER 3 PATH (insufficient windows) — Points 2 & 3 ───────────────────────
        Poor ROI (Main ROI<=3, others ROI<=2):
          pos>=5 -> INCREASE 10-15%
-         pos<5  -> Main:ZOMBIE | Moderate:PAUSE | Low:NO_CHANGE(recheck 1 cycle->PAUSE) | Dead:PAUSE
+         pos<5  -> Main/Moderate:PAUSE | Low:NO_CHANGE(recheck 1 cycle->PAUSE) | Dead:PAUSE
        Good ROI (Main ROI>3 at pos<5, else ROI>2):
          pos>=5 -> INCREASE 10-15%
          pos<5  -> NO_CHANGE
@@ -850,7 +846,7 @@ SYSTEM_PROMPT = """
        Point 5 (position 1-3):
          CPM>200 & ROI<=3 -> DECREASE 10-15% (never below base)
          CPM>200 & ROI>3  -> NO_CHANGE
-         CPM at base & ROI<=2 -> ZOMBIE (Main/Moderate) / PAUSE (Low/Dead)
+         CPM at base & ROI<=2 -> PAUSE
        Point 6 (position >3):
          ROI>=3 -> NO_CHANGE
          ROI<=3 -> INCREASE 10-15%, escalate across cycles if same persists
@@ -894,9 +890,6 @@ SYSTEM_PROMPT = """
       • If you choose PAUSE while rule_action is NOT PAUSE, justify it with numbers.
         Python will block an unjustified one (Tier 3, position ≤5, or a proven ROAS
         signal without a full-burn-zero-return pattern).
-      • ZOMBIE_FLAG is a valid final action. Use it when rule_action = ZOMBIE_FLAG, or
-        when a keyword sits at a high CPM with near-zero traffic. It parks the keyword
-        for human review; it does not move the bid.
       • Position 1 + INCREASE_CPM is blocked by Python afterwards — don't work around it.
       • A DECREASE that would breach the CPM floor is clamped to the floor by Python
         (or dropped to NO_CHANGE if the CPM is already at the floor).
@@ -1009,7 +1002,7 @@ SYSTEM_PROMPT = """
     Examples:
       jhumka       → TIER:1 | SEARCH:MAIN | POS:2 | RULE:DECREASE_CPM | FINAL_ACTION:DECREASE_CPM | AGREE:YES | CONFIDENCE:0.85
       silver ring  → TIER:3 | SEARCH:LOW  | POS:7 | RULE:INCREASE_CPM | FINAL_ACTION:INCREASE_CPM | AGREE:YES | CONFIDENCE:0.75
-      oxidised set → TIER:1 | SEARCH:MAIN | POS:1 | RULE:ZOMBIE_FLAG  | FINAL_ACTION:NO_CHANGE    | AGREE:NO  | CONFIDENCE:0.80
+      oxidised set → TIER:1 | SEARCH:MAIN | POS:1 | RULE:PAUSE      | FINAL_ACTION:NO_CHANGE    | AGREE:NO  | CONFIDENCE:0.80
 
     AGREE:NO requires a specific numeric justification in the explanation.
     Complete ALL scratchpad lines before writing any JSON.
@@ -1029,7 +1022,7 @@ SYSTEM_PROMPT = """
     {{
       "campaign_id": "",
       "targeting": "",
-      "action": "INCREASE_CPM | DECREASE_CPM | PAUSE | ZOMBIE_FLAG | NO_CHANGE",
+      "action": "INCREASE_CPM | DECREASE_CPM | PAUSE | NO_CHANGE",
       "explanation": "",
       "campaign_name": "",
       "cpm_change": 0,
@@ -1058,7 +1051,7 @@ SYSTEM_PROMPT = """
     Field rules:
       campaign_id         : use the campaign_id value from CURRENT DATA
       campaign_name       : use the campaign_name value from CURRENT DATA
-      cpm_change          : 10 for INCREASE_CPM / DECREASE_CPM. 0 for NO_CHANGE / PAUSE / ZOMBIE_FLAG.
+      cpm_change          : 10 for INCREASE_CPM / DECREASE_CPM. 0 for NO_CHANGE / PAUSE.
       confidence : MANDATORY. Calculate using CONFIDENCE SCORING rules above.
              Output as decimal (e.g. 0.80, not 80). Never null. Never 0.0 as default.
              If unsure → floor is 0.70. Maximum is 0.95. Never 1.0.
@@ -1121,10 +1114,10 @@ SYSTEM_PROMPT = """
     Before returning the JSON array, verify EVERY object contains ALL 12 fields:
       1. campaign_id       → string
       2. targeting         → string
-      3. action            → one of: INCREASE_CPM / DECREASE_CPM / NO_CHANGE / PAUSE / ZOMBIE_FLAG.
+      3. action            → one of: INCREASE_CPM / DECREASE_CPM / NO_CHANGE / PAUSE.
       4. explanation       → string (4-section || delimited format)
       5. campaign_name     → string (from CURRENT DATA)
-      6. cpm_change        → integer: 10 for INCREASE/DECREASE, 0 for NO_CHANGE/PAUSE/ZOMBIE_FLAG
+      6. cpm_change        → integer: 10 for INCREASE/DECREASE, 0 for NO_CHANGE/PAUSE
       7. confidence        → decimal between 0.70–0.95 (from scratchpad CONFIDENCE value)
       8. alternative_keywords → list ([] unless action = PAUSE)
       9.  current_cpm
@@ -1396,15 +1389,8 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
                 except Exception:
                     current_cpm = None
 
-            # ZOMBIE HARD OVERRIDE
             zombie_flag = a.get("zombie_keyword_flag", False)
-            if zombie_flag and action == "NO_CHANGE" and \
-               str(a.get("rule_action") or "").upper().strip() == "ZOMBIE_FLAG":
-                print(f"  ZOMBIE RULE HONOURED: {targeting} | NO_CHANGE -> ZOMBIE_FLAG (rule decision)")
-                action          = "ZOMBIE_FLAG"
-                a["action"]     = "ZOMBIE_FLAG"
-                a["cpm_change"] = 0
-            elif zombie_flag and action == "NO_CHANGE":
+            if zombie_flag and action == "NO_CHANGE":
                 raw_cpm_z   = a.get("current_cpm")
                 floor_val_z = a.get("cpm_floor")
                 try:
@@ -1751,10 +1737,8 @@ def _auto_accept_if_enabled(brand, campaign_id, clean_rows):
     PAUSE) as-is - no human click - so the scheduled push notebook can pick
     it up unattended. A row flagged REVIEW (LLM diverged from the rule
     decision, confidence was defaulted, or the LLM skipped the keyword) is
-    held back even in auto mode - those still need a human look. ZOMBIE_FLAG
-    is deliberately never auto-accepted; it exists to park a keyword for
-    manual review, not to move a bid, so nothing is lost by leaving it
-    pending. Returns how many rows were auto-accepted."""
+    held back even in auto mode - those still need a human look. Returns
+    how many rows were auto-accepted."""
     import queries
 
     setting = queries.fetch_autonomy_setting(campaign_id, brand)
