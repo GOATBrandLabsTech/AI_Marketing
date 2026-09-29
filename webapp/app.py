@@ -46,12 +46,44 @@ def current_brand():
     return request.args.get("brand") or session.get("brand") or "Chumbak"
 
 
-CHANNELS = ["Blinkit", "Instamart"]
+CHANNELS = ["Blinkit", "Instamart", "Zepto"]
 
 
 def current_channel():
     ch = request.args.get("channel") or session.get("channel") or "Blinkit"
     return ch if ch in CHANNELS else "Blinkit"
+
+
+def _channel_funcs(channel):
+    """The four channel-specific query functions used across the On-Demand
+    AI / Pending Actions routes, keyed by channel name so those routes don't
+    repeat the same three-way branch seven times."""
+    if channel == "Instamart":
+        return {
+            "fetch_actions": queries.fetch_instamart_ondemand_actions,
+            "fetch_dates": queries.fetch_instamart_ondemand_action_dates,
+            "campaign_status": queries.fetch_instamart_campaign_status,
+            "bulk_accept": queries.bulk_accept_instamart_ondemand_actions,
+            "accept": queries.accept_instamart_ondemand_action,
+            "override": queries.override_instamart_ondemand_action,
+        }
+    if channel == "Zepto":
+        return {
+            "fetch_actions": queries.fetch_zepto_ondemand_actions,
+            "fetch_dates": queries.fetch_zepto_ondemand_action_dates,
+            "campaign_status": queries.fetch_zepto_campaign_status,
+            "bulk_accept": queries.bulk_accept_zepto_ondemand_actions,
+            "accept": queries.accept_zepto_ondemand_action,
+            "override": queries.override_zepto_ondemand_action,
+        }
+    return {
+        "fetch_actions": queries.fetch_ondemand_actions,
+        "fetch_dates": queries.fetch_ondemand_action_dates,
+        "campaign_status": queries.fetch_campaign_status,
+        "bulk_accept": queries.bulk_accept_ondemand_actions,
+        "accept": queries.accept_ondemand_action,
+        "override": queries.override_ondemand_action,
+    }
 
 
 @app.template_filter("steps")
@@ -247,8 +279,9 @@ def actions():
     channel = current_channel()
     session["channel"] = channel
 
-    fetch_actions_fn = queries.fetch_instamart_ondemand_actions if channel == "Instamart" else queries.fetch_ondemand_actions
-    fetch_dates_fn = queries.fetch_instamart_ondemand_action_dates if channel == "Instamart" else queries.fetch_ondemand_action_dates
+    cfuncs = _channel_funcs(channel)
+    fetch_actions_fn = cfuncs["fetch_actions"]
+    fetch_dates_fn = cfuncs["fetch_dates"]
 
     if brand == queries.ALL_BRANDS:
         choices = [{"brand": b, "count": len(fetch_actions_fn(b))} for b in queries.fetch_brands()]
@@ -284,7 +317,7 @@ def actions():
 def api_ondemand_bulk_accept():
     payload = request.get_json(force=True) or {}
     channel = payload.get("channel", current_channel())
-    bulk_fn = queries.bulk_accept_instamart_ondemand_actions if channel == "Instamart" else queries.bulk_accept_ondemand_actions
+    bulk_fn = _channel_funcs(channel)["bulk_accept"]
     n = bulk_fn(payload.get("unique_keys", []), payload.get("brand", current_brand()))
     return jsonify({"ok": True, "count": n})
 
@@ -392,12 +425,9 @@ def ondemand():
                                 channel=channel, channels=CHANNELS)
 
     campaign_filter = request.args.get("campaign_id") or None
-    if channel == "Instamart":
-        campaigns = queries.fetch_instamart_campaign_status(brand)
-        rows = queries.fetch_instamart_ondemand_actions(brand, campaign_id=campaign_filter)
-    else:
-        campaigns = queries.fetch_campaign_status(brand)
-        rows = queries.fetch_ondemand_actions(brand, campaign_id=campaign_filter)
+    cfuncs = _channel_funcs(channel)
+    campaigns = cfuncs["campaign_status"](brand)
+    rows = cfuncs["fetch_actions"](brand, campaign_id=campaign_filter)
     campaign_label_map = {
         f"{c['campaign_name']} (#{c['campaign_id']})": str(c["campaign_id"]) for c in campaigns
     }
@@ -449,6 +479,8 @@ def api_ondemand_generate():
 
     if channel == "Instamart":
         import instamart_engine as engine_module
+    elif channel == "Zepto":
+        import zepto_engine as engine_module
     else:
         import ondemand_engine as engine_module
 
@@ -465,7 +497,7 @@ def api_ondemand_generate():
 def api_ondemand_accept(unique_key):
     payload = request.get_json(force=True) or {}
     channel = payload.get("channel", current_channel())
-    accept_fn = queries.accept_instamart_ondemand_action if channel == "Instamart" else queries.accept_ondemand_action
+    accept_fn = _channel_funcs(channel)["accept"]
     accept_fn(
         unique_key,
         payload.get("brand", current_brand()),
@@ -481,7 +513,7 @@ def api_ondemand_accept(unique_key):
 def api_ondemand_override(unique_key):
     payload = request.get_json(force=True) or {}
     channel = payload.get("channel", current_channel())
-    override_fn = queries.override_instamart_ondemand_action if channel == "Instamart" else queries.override_ondemand_action
+    override_fn = _channel_funcs(channel)["override"]
     override_fn(
         unique_key,
         payload.get("brand", current_brand()),

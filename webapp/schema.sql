@@ -96,9 +96,14 @@ ALTER TABLE voylla.blinkit_ondemand_actions ADD COLUMN IF NOT EXISTS push_note T
 -- engine reads before every suggestion. entity_type/entity_id is deliberately
 -- loose (no FK) - the LLM decides at write time whether a fact belongs to one
 -- keyword, one campaign, a whole brand, or nothing in particular ('general').
+-- brand is nullable: NULL means universal, visible to every brand (only
+-- valid with entity_type='general' - a campaign or brand-scoped note always
+-- needs a real brand). Every entity_type already applies across every
+-- channel automatically (no channel column at all) since the Blinkit and
+-- Instamart engines both read this same table keyed only on brand/entity.
 CREATE TABLE IF NOT EXISTS voylla.notes (
     id             SERIAL PRIMARY KEY,
-    brand          TEXT NOT NULL,
+    brand          TEXT,
     entity_type    TEXT NOT NULL CHECK (entity_type IN ('campaign', 'keyword', 'brand', 'general')),
     entity_id      TEXT,
     text           TEXT NOT NULL,

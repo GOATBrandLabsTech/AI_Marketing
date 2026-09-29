@@ -39,10 +39,15 @@ future AI bid suggestions: an upcoming event, a standing instruction ("leave X a
 weeks"), a correction. Use it whenever the user tells you something like that - don't just \
 acknowledge it in the chat and let it evaporate. Pick entity_type/entity_id based on what the \
 note is actually about (a specific campaign, a keyword across campaigns, the whole brand, or \
-'general' for something with no natural entity) - don't default to one type. After filing, tell \
-the user what you filed and where, so they can correct you if you guessed the scope wrong. This \
-never touches a campaign, bid, or schedule directly - it only shapes what the suggestion engine \
-sees next time it runs for that entity.
+'general' for something with no natural entity) - don't default to one type. A note already \
+applies across every channel automatically (Blinkit, Instamart, Zepto - the suggestion engines \
+all read the same notes table), so never file the same note twice for different channels. It \
+does NOT automatically cross brands, though - only set applies_to_all_brands=True when the user \
+explicitly says something like "across all our brands" or "company-wide", not just because it \
+happens to be true for whichever brand is selected right now; that also requires entity_type \
+'general'. After filing, tell the user what you filed, for which brand(s), and where, so they \
+can correct you if you guessed the scope wrong. This never touches a campaign, bid, or schedule \
+directly - it only shapes what the suggestion engine sees next time it runs for that entity.
 - Always use a tool to fetch real data before answering a question about performance, campaigns, \
 spend, or past decisions. Never invent or estimate a number that a tool could have given you.
 - Be concise and specific - cite the actual figures a tool returned (spend, ROAS, counts, dates) \
@@ -231,6 +236,16 @@ TOOLS = [
                     "description": "The campaign_id or keyword name this note is about. Omit for entity_type brand/general.",
                 },
                 "text": {"type": "string", "description": "The note itself, written plainly - this gets pasted into future prompts verbatim."},
+                "applies_to_all_brands": {
+                    "type": "boolean",
+                    "description": (
+                        "True ONLY when the human explicitly said this applies company-wide - "
+                        "'across all our brands', 'for every brand', 'regardless of brand' - not "
+                        "just because it happens to be true for the brand currently selected. Rare. "
+                        "Requires entity_type='general' (a campaign or a brand-scoped note can't be "
+                        "universal - only a truly brand-agnostic policy can). Default false."
+                    ),
+                },
             },
             "required": ["brand", "entity_type", "text"],
         },
@@ -498,14 +513,19 @@ def _tool_automation_status(brand, search=None):
     }
 
 
-def _tool_file_note(brand, entity_type, text, entity_id=None):
+def _tool_file_note(brand, entity_type, text, entity_id=None, applies_to_all_brands=False):
     if entity_type in ("campaign", "keyword") and not entity_id:
         return {"error": f"entity_type '{entity_type}' requires entity_id"}
-    note_id = queries.file_note(brand, entity_type, text, entity_id=entity_id, source="chat")
+    if applies_to_all_brands and entity_type != "general":
+        return {"error": "applies_to_all_brands requires entity_type='general' - retry with that, or drop applies_to_all_brands if this is really brand-specific"}
+    note_id = queries.file_note(
+        None if applies_to_all_brands else brand,
+        entity_type, text, entity_id=entity_id, source="chat",
+    )
     return {
         "ok": True,
         "note_id": note_id,
-        "filed_as": f"{entity_type}" + (f":{entity_id}" if entity_id else ""),
+        "filed_as": ("all brands" if applies_to_all_brands else brand) + f" / {entity_type}" + (f":{entity_id}" if entity_id else ""),
         "text": text,
     }
 

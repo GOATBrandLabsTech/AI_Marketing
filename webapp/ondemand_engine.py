@@ -2404,12 +2404,16 @@ def lint_notes(brand):
     """Reviews every active note for a brand and deactivates (still_relevant
     = False) anything whose event/window has clearly passed or that's
     superseded by a newer note - never a standing instruction just for being
-    old. Returns {"brand", "reviewed", "deactivated": [{"id","reason"}]}."""
+    old. Returns {"brand", "reviewed", "deactivated": [{"id","reason"}]}.
+
+    brand=None reviews only the universal notes (brand IS NULL) - call this
+    once per lint run, separately from the per-brand calls, which exclude
+    universal notes so the same one isn't re-reviewed by every brand."""
     import queries
     from db import get_anthropic_config
     import anthropic as anthropic_sdk
 
-    notes = queries.fetch_notes(brand, include_stale=False, limit=200)
+    notes = queries.fetch_notes(brand, include_stale=False, limit=200, include_universal=(brand is None))
     if not notes:
         return {"brand": brand, "reviewed": 0, "deactivated": []}
 
@@ -2425,11 +2429,11 @@ def lint_notes(brand):
     client = anthropic_sdk.Anthropic(api_key=cfg["api_key"])
     model = cfg.get("model") or "claude-haiku-4-5-20251001"
 
+    scope_label = "every brand (universal notes)" if brand is None else f"the {brand} account"
     prompt = f"""Today's date: {today}.
 
-Below are active notes for the {brand} Blinkit bidding account - context a
-human gave for future bid decisions (an upcoming event, a standing
-instruction, a correction).
+Below are active notes for {scope_label} - context a human gave for future
+bid decisions (an upcoming event, a standing instruction, a correction).
 
 {notes_text}
 

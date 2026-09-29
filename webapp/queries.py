@@ -1164,6 +1164,125 @@ def fetch_instamart_ondemand_actions(brand, campaign_id=None, limit=300):
         return cur.fetchall()
 
 
+def accept_zepto_ondemand_action(unique_key, brand, accept, cpm_llm_override, note):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.zepto_ondemand_actions "
+            "SET user_implemented = %(accept)s, "
+            "    cpm_llm_override = %(cpm)s, "
+            "    override_note = %(note)s, "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = %(unique_key)s AND "Brand" = %(brand)s',
+            {
+                "accept": "true" if accept else "false",
+                "cpm": cpm_llm_override,
+                "note": note,
+                "unique_key": unique_key,
+                "brand": brand,
+            },
+        )
+        return cur.rowcount
+
+
+def fetch_zepto_ondemand_action_dates(brand, limit=30):
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT action_date FROM voylla.zepto_ondemand_actions "
+            'WHERE "Brand" = %(brand)s ORDER BY action_date DESC LIMIT %(limit)s',
+            {"brand": brand, "limit": limit},
+        )
+        return [str(r["action_date"]) for r in cur.fetchall()]
+
+
+ZEPTO_CAMPAIGN_STATUS_SQL = """
+SELECT "Campaign_id"::TEXT AS campaign_id,
+       MAX("Campaign_name")  AS campaign_name,
+       "Brand"               AS brand,
+       NULL::numeric         AS budget,
+       'UNKNOWN'             AS last_status,
+       0                     AS window_count,
+       NULL::date            AS next_start,
+       NULL::date            AS last_end
+FROM "DataWarehouse"."Keyword_Performance_Zepto"
+WHERE (%(brand)s = '__ALL__' OR "Brand" = %(brand)s)
+  AND TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS') >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY "Campaign_id", "Brand"
+ORDER BY campaign_name
+"""
+
+
+def fetch_zepto_campaign_status(brand):
+    """Zepto has no live campaign-status feed yet, so this is a simple
+    campaign list off the last 30 days of performance data - same output
+    shape as fetch_campaign_status()/fetch_instamart_campaign_status() so
+    the dashboard templates stay channel-agnostic."""
+    with get_cursor() as cur:
+        cur.execute(ZEPTO_CAMPAIGN_STATUS_SQL, {"brand": brand})
+        rows = cur.fetchall()
+    settings = fetch_autonomy_settings(brand)
+    for r in rows:
+        s = settings.get(str(r["campaign_id"]))
+        r["autonomy_mode"] = s["mode"] if s else "semi_auto"
+        r["ondemand_managed"] = s["ondemand_managed"] if s else False
+        r["bid_tolerance_pct"] = s["bid_tolerance_pct"] if s else 20
+    return rows
+
+
+def bulk_accept_zepto_ondemand_actions(unique_keys, brand):
+    if not unique_keys:
+        return 0
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.zepto_ondemand_actions "
+            "SET user_implemented = 'true', "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = ANY(%(unique_keys)s) AND "Brand" = %(brand)s',
+            {"unique_keys": list(unique_keys), "brand": brand},
+        )
+        return cur.rowcount
+
+
+def override_zepto_ondemand_action(unique_key, brand, override_action_value, cpm_change_user, note):
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "UPDATE voylla.zepto_ondemand_actions "
+            "SET user_implemented = 'false', "
+            "    override_action = %(override_action)s, "
+            "    cpm_change_user = %(cpm)s, "
+            "    override_note = %(note)s, "
+            "    implementation_date = CURRENT_DATE "
+            'WHERE unique_key = %(unique_key)s AND "Brand" = %(brand)s',
+            {
+                "override_action": override_action_value,
+                "cpm": cpm_change_user,
+                "note": note,
+                "unique_key": unique_key,
+                "brand": brand,
+            },
+        )
+        return cur.rowcount
+
+
+def fetch_zepto_ondemand_actions(brand, campaign_id=None, limit=300):
+    """Rows from the Zepto on-demand replica table."""
+    with get_cursor() as cur:
+        if campaign_id:
+            cur.execute(
+                'SELECT * FROM voylla.zepto_ondemand_actions '
+                'WHERE "Brand" = %(brand)s AND campaign_id = %(campaign_id)s '
+                "ORDER BY requested_at DESC, unique_key LIMIT %(limit)s",
+                {"brand": brand, "campaign_id": str(campaign_id), "limit": limit},
+            )
+        else:
+            cur.execute(
+                'SELECT * FROM voylla.zepto_ondemand_actions '
+                'WHERE "Brand" = %(brand)s '
+                "ORDER BY requested_at DESC, unique_key LIMIT %(limit)s",
+                {"brand": brand, "limit": limit},
+            )
+        return cur.fetchall()
+
+
 AUTO_ACCEPT_ACTIONS = {"INCREASE_CPM", "DECREASE_CPM", "PAUSE"}
 
 
@@ -1215,9 +1334,20 @@ def file_note(brand, entity_type, text, entity_id=None, source="chat", created_b
     Chat has. entity_type/entity_id say what the note is about: a specific
     campaign_id, a keyword (brand-wide, not tied to one campaign), the whole
     brand, or 'general' (entity_id ignored) for something with no natural
-    entity at all."""
+    entity at all.
+
+    brand=None means the note is universal - visible to every brand's AI,
+    not just the one it was filed from. Only valid for entity_type='general':
+    a campaign literally belongs to one brand, and a 'brand'-type note with
+    no brand is self-contradictory, so those always require a real brand -
+    the same wall that already keeps Voylla/Chumbak/Petcrux from leaking
+    into each other's decisions. Use sparingly - reserve it for something
+    that's genuinely true company-wide (a platform-wide policy), not just
+    something that happens to apply to whichever brand is in the chat."""
     if entity_type not in NOTE_ENTITY_TYPES:
         raise ValueError(f"entity_type must be one of {NOTE_ENTITY_TYPES}")
+    if brand is None and entity_type != "general":
+        raise ValueError("brand is required unless entity_type is 'general'")
     with get_cursor(commit=True) as cur:
         cur.execute(
             """
@@ -1236,21 +1366,27 @@ def file_note(brand, entity_type, text, entity_id=None, source="chat", created_b
 
 def fetch_relevant_notes(brand, campaign_id=None, targeting=None, limit=20):
     """Notes that should inform a decision about this specific keyword: any
-    still-relevant brand-wide/general note, plus anything filed against this
-    exact campaign_id or this exact keyword. Used both by the suggestion
-    engine (folded into the prompt) and reusable anywhere else that needs
-    'what do we know about this'."""
+    still-relevant brand-wide/general note (plus any universal note filed
+    with no brand at all - visible to every brand), plus anything filed
+    against this exact campaign_id or this exact keyword. Used both by the
+    suggestion engine (folded into the prompt) and reusable anywhere else
+    that needs 'what do we know about this'."""
     with get_cursor() as cur:
         cur.execute(
             """
-            SELECT id, entity_type, entity_id, text, source, created_at
+            SELECT id, entity_type, entity_id, text, source, created_at, brand
             FROM voylla.notes
             WHERE still_relevant = TRUE
-              AND brand = %(brand)s
               AND (
-                    entity_type IN ('brand', 'general')
-                    OR (entity_type = 'campaign' AND entity_id = %(campaign_id)s)
-                    OR (entity_type = 'keyword'  AND entity_id = %(targeting)s)
+                    brand IS NULL
+                    OR (
+                        brand = %(brand)s
+                        AND (
+                              entity_type IN ('brand', 'general')
+                              OR (entity_type = 'campaign' AND entity_id = %(campaign_id)s)
+                              OR (entity_type = 'keyword'  AND entity_id = %(targeting)s)
+                        )
+                    )
               )
             ORDER BY created_at DESC
             LIMIT %(limit)s
@@ -1265,19 +1401,27 @@ def fetch_relevant_notes(brand, campaign_id=None, targeting=None, limit=20):
         return cur.fetchall()
 
 
-def fetch_notes(brand, include_stale=False, limit=100):
+def fetch_notes(brand, include_stale=False, limit=100, include_universal=True):
     """All notes for a brand, most recent first - for Agent Chat to answer
     'what notes do we have' and as a manual lint view (old + still_relevant
-    rows are the ones worth reviewing)."""
+    rows are the ones worth reviewing). Includes universal (brand IS NULL)
+    notes by default, since those genuinely apply to this brand too - set
+    include_universal=False for a per-brand lint pass that shouldn't
+    re-review the same universal notes once per brand. Calling with
+    brand=None (and include_universal=True, the default) returns only the
+    universal notes - the dedicated lint pass for those."""
     with get_cursor() as cur:
         cur.execute(
             """
-            SELECT id, entity_type, entity_id, text, source, created_at, still_relevant
+            SELECT id, entity_type, entity_id, text, source, created_at, still_relevant, brand
             FROM voylla.notes
-            WHERE brand = %(brand)s {relevance_filter}
+            WHERE ({brand_filter}) {relevance_filter}
             ORDER BY created_at DESC
             LIMIT %(limit)s
-            """.format(relevance_filter="" if include_stale else "AND still_relevant = TRUE"),
+            """.format(
+                brand_filter="brand IS NULL OR brand = %(brand)s" if include_universal else "brand = %(brand)s",
+                relevance_filter="" if include_stale else "AND still_relevant = TRUE",
+            ),
             {"brand": brand, "limit": limit},
         )
         return cur.fetchall()

@@ -115,7 +115,7 @@
               <span class="badge" style="background:#fef3e2;color:#8a5a00;" title="Rule engine wanted {{ r.rule_action }}"><span class="dot" style="background:var(--warning)"></span>diverged</span>
             {% endif %}
           </td>
-          <td class="px-4 py-2.5 text-right whitespace-nowrap">{{ r.current_cpm }}{% if r.bid_change %} <span style="color:var(--ink-muted)">(&Delta;{{ r.bid_change }})</span>{% endif %}</td>
+          <td class="px-4 py-2.5 text-right whitespace-nowrap">{{ r.current_cpm if (r.current_cpm is defined and r.current_cpm is not none) else r.current_cpc }}{% if r.bid_change %} <span style="color:var(--ink-muted)">(&Delta;{{ r.bid_change }})</span>{% endif %}</td>
           <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.confidence if r.confidence is not none else '-' }}</td>
           <td class="px-4 py-2.5">
             {% if r.override_action %}<span class="badge" style="background:#efeafb;color:#5b3fb8;"><span class="dot" style="background:#4a3aa7"></span>override: {{ r.override_action }}</span>
