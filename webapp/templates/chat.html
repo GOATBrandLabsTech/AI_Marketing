@@ -24,6 +24,24 @@
       <div class="text-xs px-2.5 py-2" style="color:var(--ink-muted)">No conversations yet.</div>
       {% endfor %}
     </div>
+    <div class="border-t shrink-0" style="border-color:var(--grid); max-height:230px; display:flex; flex-direction:column;">
+      <div class="px-3 pt-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wide flex items-center justify-between" style="color:var(--ink-muted)">
+        <span>Memory</span>
+        <span class="font-normal">{{ notes|length }} active</span>
+      </div>
+      <div class="overflow-y-auto px-2 pb-2.5 space-y-1.5" style="flex:1;" title="What the on-demand AI reads before every suggestion - filed via chat, applies across every channel automatically.">
+        {% for n in notes %}
+        <div class="rounded-lg px-2 py-1.5" style="background:var(--plane);">
+          <span class="badge" style="background:#efeafb;color:#5b3fb8; font-size:9.5px; padding:1px 5px; display:inline-block; margin-bottom:2px;">
+            {{ 'all brands' if n.brand is none else n.entity_type }}{% if n.entity_id %}: {{ n.entity_id }}{% endif %}
+          </span>
+          <div class="text-xs" style="color:var(--ink-2); line-height:1.4;">{{ n.text }}</div>
+        </div>
+        {% else %}
+        <div class="text-xs px-1" style="color:var(--ink-muted)">Nothing filed yet - tell the agent something worth remembering.</div>
+        {% endfor %}
+      </div>
+    </div>
   </div>
   <div class="flex-1 flex flex-col min-w-0">
     <div id="messages" class="flex-1 overflow-y-auto p-5 space-y-4">

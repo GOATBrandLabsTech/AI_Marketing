@@ -630,8 +630,9 @@ def chat_page():
     if not thread_id and threads:
         thread_id = threads[0]["thread_id"]
     messages = chat.get_messages(thread_id) if thread_id else []
+    notes = queries.fetch_notes(brand, include_stale=False, limit=50)
     return render_template(
-        "chat.html", threads=threads, thread_id=thread_id, messages=messages, active="chat"
+        "chat.html", threads=threads, thread_id=thread_id, messages=messages, notes=notes, active="chat"
     )
 
 
