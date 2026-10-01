@@ -295,7 +295,13 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
     df["sales"] = df["sales"].fillna(0)
     campaign_name = df["campaign_name"].dropna().iloc[-1] if not df["campaign_name"].dropna().empty else ""
 
-    today = pd.Timestamp.now().normalize()
+    # Quick-commerce ad platforms keep crediting sales to a day for a couple
+    # of days after it ends - the most recent 1-3 days are provisionally
+    # low, not genuinely weak, until attribution catches up. Same 3-day
+    # buffer Blinkit's engine already applies: every window below is
+    # computed as of 3 days ago, not today, so a real dip reads as real.
+    today = pd.Timestamp.now().normalize() - pd.Timedelta(days=3)
+    df = df[df["report_date"] <= today]
     windows = {}
     for days in (7, 15, 30):
         cutoff = today - pd.Timedelta(days=days)
@@ -721,6 +727,14 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
            already flags this would be another INCREASE_CPC in a row - repeating the
            same call every cycle on one or two lucky days is how a CPC climbs far past
            what the keyword is actually earning. Your judgment call, not a Python cap.
+        -> Every number you see is already 3 days old, and even that may not be final.
+           Quick-commerce platforms keep crediting sales to a day for a couple of days
+           after it ends, so this data already excludes the most recent 3 days entirely
+           - roas_1d/7d/15d/30d are all "as of 3 days ago," never today or yesterday.
+           That is a floor, not a guarantee: the newest edge of any window can still
+           firm up further as attribution keeps catching up. A sudden-looking dip right
+           at the recent edge is somewhat more likely to be incomplete than an equally
+           sharp dip from two weeks ago, which has had time to settle. Weigh accordingly.
 
         CURRENT DATA (7d/15d/30d aggregated, keyword + match_type grain):
         {json.dumps(clean_nan(data_for_llm))}

@@ -851,6 +851,19 @@ SYSTEM_PROMPT = """
        far past what the keyword is actually earning. This is a judgment
        call for you to make with the numbers, not a Python-enforced cap.
 
+    7. Every number you see is already 3 days old, and even that may not be
+       final. Blinkit keeps crediting sales to a day for a couple of days
+       after it ends, so Python already excludes the most recent 3 days
+       entirely before computing any window you see — roas_1d/7d/15d/30d
+       are all "as of 3 days ago," never today or yesterday. This is a
+       floor, not a guarantee: the oldest 1-2 days inside roas_1d or the
+       newest edge of roas_7d can still firm up further as attribution
+       keeps catching up. A sudden-looking dip right at the recent edge of
+       a window is somewhat more likely to be incomplete data than an
+       equally sharp dip from two weeks ago, which has had time to settle.
+       Weigh accordingly - don't react to the newest data point as hard as
+       you'd react to the same number from deeper in the window.
+
     When you DO override the rule, you must state it explicitly:
       "Rule Decision: PAUSE | LLM Action: NO_CHANGE — overriding because [specific
        numeric reason]." An override without a concrete reason is not allowed.
@@ -861,7 +874,8 @@ SYSTEM_PROMPT = """
       3. 30-day ROAS as supporting context (not an automatic veto on cuts)
       4. 15-day / 7-day ROAS trend
       5. Signal reliability (converting_days_7d vs active_days_7d)
-      6. Previous recommendation outcome
+      6. Attribution lag at the recent edge of any window
+      7. Previous recommendation outcome
 
 
     ═══════════════════════════════════════════════════════════════
