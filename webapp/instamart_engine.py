@@ -100,6 +100,28 @@ def detect_oscillation(history_list):
     return False, ""
 
 
+def detect_same_direction_streak(history_list):
+    """Oscillation detection only catches alternating inc/dec; it says
+    nothing about N INCREASE_CPM in a row, which is its own failure mode -
+    a keyword's CPM compounding upward every cycle on the strength of the
+    same one or two lucky days, never checked, never reversed. Counts
+    consecutive IMPLEMENTED moves in the same direction from the most
+    recent cycle backward. Returns (streak_len, action) or (0, "")."""
+    streak_actions = {"INCREASE_CPM", "DECREASE_CPM"}
+    streak_len = 0
+    streak_action = ""
+    for h in history_list:
+        action = h.get("action", "")
+        if h.get("implemented") != "IMPLEMENTED" or action not in streak_actions:
+            break
+        if streak_len == 0:
+            streak_action = action
+        elif action != streak_action:
+            break
+        streak_len += 1
+    return streak_len, streak_action
+
+
 def get_cooldown_flag(history_list):
     """Cooldown warning string if the last IMPLEMENTED action was an
     INCREASE or DECREASE - block the opposite move for one cycle unless
@@ -273,6 +295,24 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
         for col in (f"spend_{days}d", f"sales_{days}d", f"impressions_{days}d", f"roas_{days}d"):
             merged[col] = merged[col].fillna(0)
 
+    # active_days_7d (spent) vs converting_days_7d (actually sold something) -
+    # a keyword spending every day but converting on only 1 of 7 can carry
+    # the same trailing roas_7d as one converting steadily, and the two are
+    # not equally trustworthy. See CORE PHILOSOPHY's signal-reliability note.
+    df7 = df[df["report_date"] >= today - pd.Timedelta(days=7)]
+    active_days = (
+        df7[df7["spend"] > 0].groupby(["targeting", "match_type"])["report_date"]
+        .nunique().reset_index().rename(columns={"report_date": "active_days_7d"})
+    )
+    converting_days = (
+        df7[df7["sales"] > 0].groupby(["targeting", "match_type"])["report_date"]
+        .nunique().reset_index().rename(columns={"report_date": "converting_days_7d"})
+    )
+    merged = merged.merge(active_days, on=["targeting", "match_type"], how="left")
+    merged = merged.merge(converting_days, on=["targeting", "match_type"], how="left")
+    merged["active_days_7d"] = merged["active_days_7d"].fillna(0).clip(upper=7).astype(int)
+    merged["converting_days_7d"] = merged["converting_days_7d"].fillna(0).clip(upper=7).astype(int)
+
     bid_query = text("""
         SELECT targeting, match_type, current_bid AS current_cpm,
                min_bid, search_count AS keyword_searches
@@ -332,7 +372,7 @@ def build_previous_context(history_df, campaign_id, targeting_key):
     impl = resolve_impl(rec.get("user_implemented"))
     history_rows = [
         {"date": str(r.get("action_date", "")), "action": r.get("action", "UNKNOWN"), "implemented": resolve_impl(r.get("user_implemented"))}
-        for r in filtered.head(5).to_dict(orient="records")
+        for r in filtered.head(8).to_dict(orient="records")
     ]
     loop, loop_desc = detect_oscillation(history_rows)
     cooldown = get_cooldown_flag(history_rows)
@@ -342,6 +382,14 @@ def build_previous_context(history_df, campaign_id, targeting_key):
         summary += f" | LOOP: {loop_desc}"
     if cooldown:
         summary += f" | {cooldown}"
+
+    streak_len, streak_action = detect_same_direction_streak(history_rows)
+    if streak_len >= 3:
+        summary += (
+            f" | NOTE: this would be {streak_action} #{streak_len + 1} in a row for this "
+            f"keyword if implemented again - check converting_days_7d before repeating it "
+            f"on the strength of the same recent cycles."
+        )
 
     return {"previous_summary": summary, "previous_history": history_rows}
 
@@ -659,6 +707,16 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
            numeric signal, and say so explicitly if you act on one.
         -> zombie_keyword_flag=true means near-zero traffic at/above the floor CPM -
            evidence for PAUSE, not an automatic one.
+        -> A trailing roas_7d does not tell you how it was earned. Each row carries
+           active_days_7d (days with any spend) and converting_days_7d (days that
+           actually had a sale). A roas_7d of 5.8 built on 6 of 7 converting days is
+           reliable; the SAME roas_7d built on 1 of 7 converting days - one lucky sale
+           carrying six zero-sale days - is not, even though the number looks
+           identical. Check converting_days_7d against active_days_7d before trusting
+           a strong roas_7d enough to increase again, especially if previous_summary
+           already flags this would be another INCREASE_CPM in a row - repeating the
+           same call every cycle on one or two lucky days is how a CPM climbs far past
+           what the keyword is actually earning. Your judgment call, not a Python cap.
 
         CURRENT DATA (7d/15d/30d aggregated, keyword + match_type grain):
         {json.dumps(clean_nan(data_for_llm))}
@@ -681,7 +739,7 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
         """
 
     response = client.messages.create(
-        model=model, max_tokens=8000, temperature=0,
+        model=model, max_tokens=12000, temperature=0,
         messages=[{"role": "user", "content": prompt}],
     )
     action_obj = extract_json(response.content[0].text)
