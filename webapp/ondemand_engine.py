@@ -155,6 +155,28 @@ def detect_oscillation(history_list):
     return False, ""
 
 
+def detect_same_direction_streak(history_list):
+    """Oscillation detection only catches alternating inc/dec; it says
+    nothing about N INCREASE_CPM in a row, which is its own failure mode -
+    a keyword's CPM compounding upward every cycle on the strength of the
+    same one or two lucky days, never checked, never reversed. Counts
+    consecutive IMPLEMENTED moves in the same direction from the most
+    recent cycle backward. Returns (streak_len, action) or (0, "")."""
+    streak_actions = {"INCREASE_CPM", "DECREASE_CPM"}
+    streak_len = 0
+    streak_action = ""
+    for h in history_list:
+        action = h.get("action", "")
+        if h.get("implemented") != "IMPLEMENTED" or action not in streak_actions:
+            break
+        if streak_len == 0:
+            streak_action = action
+        elif action != streak_action:
+            break
+        streak_len += 1
+    return streak_len, streak_action
+
+
 def get_cooldown_flag(history_list):
     if not history_list:
         return ""
@@ -206,7 +228,7 @@ def build_previous_context(history_df, campaign_id_str, targeting_key):
                 re.findall(r"\[(?:ESC|RECHECK):[^\]]*\]", str(r.get("explanation") or ""))
             ),
         }
-        for r in filtered.head(5).to_dict(orient="records")
+        for r in filtered.head(8).to_dict(orient="records")
     ]
 
     is_loop, loop_desc = detect_oscillation(history_rows)
@@ -216,6 +238,14 @@ def build_previous_context(history_df, campaign_id_str, targeting_key):
     cooldown = get_cooldown_flag(history_rows)
     if cooldown and not is_loop:
         summary += f" | WARNING {cooldown}"
+
+    streak_len, streak_action = detect_same_direction_streak(history_rows)
+    if streak_len >= 3:
+        summary += (
+            f" | NOTE: this would be {streak_action} #{streak_len + 1} in a row for this "
+            f"keyword if implemented again - check converting_days_7d before repeating it "
+            f"on the strength of the same recent cycles."
+        )
 
     return {
         "previous_summary": summary,
@@ -806,6 +836,21 @@ SYSTEM_PROMPT = """
     5. Insufficient data (Tier 3) still gets a rule decision from the Points 2/3
        matrices — respect it. "Not enough data" is not an automatic NO_CHANGE.
 
+    6. A trailing ROAS number does not tell you how it was earned, and that
+       matters. Each row carries active_days_7d (days with any spend in the
+       last 7) and converting_days_7d (days that actually had a sale). A
+       roas_7d of 5.8 built on 6 of 7 converting days is a reliable signal.
+       The SAME roas_7d of 5.8 built on 1 of 7 converting days - one lucky
+       sale carrying six zero-sale days - is not, even though the number
+       looks identical. Before you treat a strong roas_7d as a reason to
+       increase again, check converting_days_7d against active_days_7d. A
+       low ratio (1-2 converting days out of 7) is a reason to slow down or
+       hold even if the rule says increase and even if you already agreed
+       with an increase last cycle - repeating the same call every cycle on
+       the strength of the same one or two lucky days is how a CPM climbs
+       far past what the keyword is actually earning. This is a judgment
+       call for you to make with the numbers, not a Python-enforced cap.
+
     When you DO override the rule, you must state it explicitly:
       "Rule Decision: PAUSE | LLM Action: NO_CHANGE — overriding because [specific
        numeric reason]." An override without a concrete reason is not allowed.
@@ -815,7 +860,8 @@ SYSTEM_PROMPT = """
       2. Data sufficiency tier + search-volume tier
       3. 30-day ROAS as supporting context (not an automatic veto on cuts)
       4. 15-day / 7-day ROAS trend
-      5. Previous recommendation outcome
+      5. Signal reliability (converting_days_7d vs active_days_7d)
+      6. Previous recommendation outcome
 
 
     ═══════════════════════════════════════════════════════════════
@@ -1929,6 +1975,26 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
     active_days_df["campaign_id"] = active_days_df["campaign_id"].astype(str).str.strip()
     aggregated_df = aggregated_df.merge(active_days_df, on=["campaign_id", "targeting"], how="left")
     aggregated_df["active_days_7d"] = aggregated_df["active_days_7d"].fillna(7).clip(upper=7).astype(int)
+
+    # Days that actually converted, not just spent - the gap between this and
+    # active_days_7d is exactly what a plain roas_7d average can't show: a
+    # keyword spending every day but converting on only 1 of 7 can carry the
+    # same trailing ROAS as one converting steadily, and the two are not
+    # equally trustworthy. See the CORE PHILOSOPHY "signal reliability" note.
+    converting_days_df = (
+        df7[df7["total_sales"] > 0]
+        .groupby(["Campaign ID", "Targeting Value"])["report_date"]
+        .nunique()
+        .reset_index()
+        .rename(columns={
+            "Campaign ID": "campaign_id",
+            "Targeting Value": "targeting",
+            "report_date": "converting_days_7d",
+        })
+    )
+    converting_days_df["campaign_id"] = converting_days_df["campaign_id"].astype(str).str.strip()
+    aggregated_df = aggregated_df.merge(converting_days_df, on=["campaign_id", "targeting"], how="left")
+    aggregated_df["converting_days_7d"] = aggregated_df["converting_days_7d"].fillna(0).clip(upper=7).astype(int)
 
     keyword_constants_df = (
         df.groupby(["Campaign ID", "Targeting Value"])
