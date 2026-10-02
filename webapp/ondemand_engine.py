@@ -167,8 +167,11 @@ def detect_same_direction_streak(history_list):
     streak_action = ""
     for h in history_list:
         action = h.get("action", "")
-        if h.get("implemented") != "IMPLEMENTED" or action not in streak_actions:
-            break
+        if h.get("implemented") != "Implemented" or action not in streak_actions:
+            # A hold / NO_CHANGE cycle in between does not reset a climb -
+            # jhumke was raised on 8 of 15 days with NO_CHANGE days mixed in,
+            # and counting only back-to-back days called that a streak of 3.
+            continue
         if streak_len == 0:
             streak_action = action
         elif action != streak_action:
@@ -228,7 +231,7 @@ def build_previous_context(history_df, campaign_id_str, targeting_key):
                 re.findall(r"\[(?:ESC|RECHECK):[^\]]*\]", str(r.get("explanation") or ""))
             ),
         }
-        for r in filtered.head(8).to_dict(orient="records")
+        for r in filtered.head(16).to_dict(orient="records")
     ]
 
     is_loop, loop_desc = detect_oscillation(history_rows)
@@ -242,9 +245,10 @@ def build_previous_context(history_df, campaign_id_str, targeting_key):
     streak_len, streak_action = detect_same_direction_streak(history_rows)
     if streak_len >= 3:
         summary += (
-            f" | NOTE: this would be {streak_action} #{streak_len + 1} in a row for this "
-            f"keyword if implemented again - check converting_days_7d before repeating it "
-            f"on the strength of the same recent cycles."
+            f" | NOTE: {streak_len} implemented {streak_action} moves in this keyword's "
+            f"recent history with no reversal between them - doing it again would be "
+            f"#{streak_len + 1}. Check converting_days_7d before repeating it on the "
+            f"strength of the same recent cycles."
         )
 
     return {
