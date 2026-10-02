@@ -855,18 +855,22 @@ SYSTEM_PROMPT = """
        far past what the keyword is actually earning. This is a judgment
        call for you to make with the numbers, not a Python-enforced cap.
 
-    7. Every number you see is already 3 days old, and even that may not be
-       final. Blinkit keeps crediting sales to a day for a couple of days
-       after it ends, so Python already excludes the most recent 3 days
-       entirely before computing any window you see — roas_1d/7d/15d/30d
-       are all "as of 3 days ago," never today or yesterday. This is a
-       floor, not a guarantee: the oldest 1-2 days inside roas_1d or the
-       newest edge of roas_7d can still firm up further as attribution
-       keeps catching up. A sudden-looking dip right at the recent edge of
-       a window is somewhat more likely to be incomplete data than an
-       equally sharp dip from two weeks ago, which has had time to settle.
-       Weigh accordingly - don't react to the newest data point as hard as
-       you'd react to the same number from deeper in the window.
+    7. The data runs through YESTERDAY, but recent days are not final. Blinkit
+       keeps crediting sales to a day for several days after it ends, so a
+       day's sales keep rising while its spend stays fixed. Each row carries
+       BOTH views: roas_1d / roas_7d (and sales_*) are ADJUSTED - recent days
+       scaled up by factors measured from Blinkit's own day-1 snapshots versus
+       what those same days show now - and roas_1d_raw / roas_7d_raw are the
+       numbers exactly as Blinkit reports them today. The adjusted figure is
+       the better estimate of where the day will settle; the raw one is what
+       is proven so far. A zero-sale day stays zero in both - scaling cannot
+       invent a sale, so a keyword spending with no sales yesterday is a real
+       warning even though the adjustment lifts its neighbours. The factor is
+       measured at brand level, so for a keyword with only a few sales a day
+       the true settling can differ; lean on the raw figure when the adjusted
+       one rests on one or two orders. The run note in the user message says
+       how large the adjustment is this run - if it is large, the recent edge
+       is leaning heavily on an estimate.
 
     When you DO override the rule, you must state it explicitly:
       "Rule Decision: PAUSE | LLM Action: NO_CHANGE — overriding because [specific
@@ -878,7 +882,7 @@ SYSTEM_PROMPT = """
       3. 30-day ROAS as supporting context (not an automatic veto on cuts)
       4. 15-day / 7-day ROAS trend
       5. Signal reliability (converting_days_7d vs active_days_7d)
-      6. Attribution lag at the recent edge of any window
+      6. Raw vs adjusted ROAS at the recent edge (attribution lag)
       7. Previous recommendation outcome
 
 
@@ -1823,9 +1827,169 @@ def _auto_accept_if_enabled(brand, campaign_id, clean_rows):
     return accepted
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# ATTRIBUTION LAG - measured, self-correcting uplift factors.
+#
+# Blinkit keeps crediting sales to a day for several days after it is first
+# reported (Sep 29 first showed Rs 777 and later Rs 1,256 on the same spend).
+# Blinkit_Ads_Report_backup freezes each date as it looked on its first day
+# (one copy per date, created the next day, never updated); Blinkit_Ads_Report
+# keeps updating. Live-vs-frozen for the same date is the real growth, and
+# the engine re-measures it on every first run of the day, so the factors
+# correct themselves as more days pile up.
+# ══════════════════════════════════════════════════════════════════════════
+
+ATTRIBUTION_MAX_AGE = 10
+# Used only until a brand has enough history to measure its own.
+ATTRIBUTION_FALLBACK = {1: 1.20, 2: 1.10, 3: 1.04}
+
+
+def _ensure_attribution_tables(engine):
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS voylla.blinkit_attribution_obs (
+                obs_date date NOT NULL, brand text NOT NULL, age_days int NOT NULL,
+                ratio numeric NOT NULL, PRIMARY KEY (obs_date, brand, age_days))"""))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS voylla.blinkit_attribution_factors (
+                brand text NOT NULL, age_days int NOT NULL, factor numeric NOT NULL,
+                samples int, settled_uplift numeric, settled_n int,
+                updated_at timestamp NOT NULL DEFAULT NOW(), PRIMARY KEY (brand, age_days))"""))
+
+
+def _isotonic_nondecreasing(y, w):
+    """Pool-adjacent-violators: the closest non-decreasing curve to y."""
+    blocks = []
+    for yi, wi in zip(y, w):
+        blocks.append([yi, wi, 1])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            v2, w2, c2 = blocks.pop()
+            v1, w1, c1 = blocks.pop()
+            blocks.append([(v1 * w1 + v2 * w2) / (w1 + w2), w1 + w2, c1 + c2])
+    out = []
+    for v, _, c in blocks:
+        out += [v] * c
+    return out
+
+
+def compute_attribution_factors(engine, brand):
+    """Returns {"factors": {age_days: factor}, "settled": x, "settled_n": n}
+    or None when there is not enough history yet. age_days = how many
+    calendar days old a report date is (yesterday = 1)."""
+    pairs = pd.read_sql(text("""
+        WITH b AS (
+          SELECT TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')::date AS d,
+                 SUM("Direct Sales"+"Indirect Sales") AS bs, MIN(created_at)::date AS c
+          FROM voylla."Blinkit_Ads_Report_backup" WHERE "Brand" = :brand GROUP BY 1),
+        l AS (
+          SELECT TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')::date AS d,
+                 SUM("Direct Sales"+"Indirect Sales") AS ls
+          FROM voylla."Blinkit_Ads_Report" WHERE "Brand" = :brand GROUP BY 1)
+        SELECT b.d, b.bs, l.ls, (CURRENT_DATE - b.d) AS age
+        FROM b JOIN l ON b.d = l.d
+        WHERE (b.c - b.d) = 1 AND b.d >= CURRENT_DATE - 150 AND b.bs > 1000
+    """), engine, params={"brand": brand})
+    if pairs.empty:
+        return None
+    pairs["ratio"] = pairs["ls"].astype(float) / pairs["bs"].astype(float)
+    pairs["age"] = pairs["age"].astype(int)
+
+    settled_pairs = pairs[pairs["age"] >= 15]["ratio"]
+    if len(settled_pairs) < 20:
+        return None
+    settled = float(settled_pairs.median())
+
+    # Record today's cross-section (one date per age) so the per-age curve
+    # gets more samples every day instead of resting on a single date.
+    recent = pairs[(pairs["age"] >= 2) & (pairs["age"] <= ATTRIBUTION_MAX_AGE)]
+    with engine.begin() as conn:
+        for _, r in recent.iterrows():
+            conn.execute(text("""
+                INSERT INTO voylla.blinkit_attribution_obs (obs_date, brand, age_days, ratio)
+                VALUES (CURRENT_DATE, :brand, :age, :ratio)
+                ON CONFLICT (obs_date, brand, age_days) DO UPDATE SET ratio = EXCLUDED.ratio"""),
+                {"brand": brand, "age": int(r["age"]), "ratio": float(r["ratio"])})
+    obs = pd.read_sql(text("""
+        SELECT age_days, ratio FROM voylla.blinkit_attribution_obs
+        WHERE brand = :brand AND obs_date >= CURRENT_DATE - 14"""), engine, params={"brand": brand})
+    obs["ratio"] = obs["ratio"].astype(float)
+    g = obs.groupby("age_days")["ratio"].agg(["median", "count"])
+
+    ages = list(range(1, ATTRIBUTION_MAX_AGE + 1))
+    y, w = [], []
+    for a in ages:
+        if a == 1:                       # the backup IS the day-1 view
+            y.append(1.0); w.append(5.0)
+        elif a in g.index:
+            y.append(float(g.loc[a, "median"])); w.append(float(g.loc[a, "count"]))
+        else:
+            y.append(y[-1]); w.append(0.5)
+    smooth = _isotonic_nondecreasing(y, w)
+    factors = {a: round(min(1.6, max(1.0, settled / min(smooth[i], settled))), 3)
+               for i, a in enumerate(ages)}
+    return {"factors": factors, "settled": round(settled, 3), "settled_n": int(len(settled_pairs)),
+            "samples": {a: int(g.loc[a, "count"]) if a in g.index else 0 for a in ages}}
+
+
+def get_attribution_factors(engine, brand):
+    """(factors, source). Re-measured at most once every 20 hours, stored in
+    voylla.blinkit_attribution_factors so it can be inspected; falls back to
+    flat defaults rather than failing a run."""
+    try:
+        _ensure_attribution_tables(engine)
+        cached = pd.read_sql(text("""
+            SELECT age_days, factor FROM voylla.blinkit_attribution_factors
+            WHERE brand = :brand AND updated_at > NOW() - INTERVAL '20 hours'"""),
+            engine, params={"brand": brand})
+        if not cached.empty:
+            return {int(r.age_days): float(r.factor) for r in cached.itertuples()}, "measured"
+        res = compute_attribution_factors(engine, brand)
+        if res:
+            with engine.begin() as conn:
+                for a, f in res["factors"].items():
+                    conn.execute(text("""
+                        INSERT INTO voylla.blinkit_attribution_factors
+                          (brand, age_days, factor, samples, settled_uplift, settled_n, updated_at)
+                        VALUES (:brand, :age, :f, :s, :su, :sn, NOW())
+                        ON CONFLICT (brand, age_days) DO UPDATE SET factor = EXCLUDED.factor,
+                          samples = EXCLUDED.samples, settled_uplift = EXCLUDED.settled_uplift,
+                          settled_n = EXCLUDED.settled_n, updated_at = NOW()"""),
+                        {"brand": brand, "age": a, "f": f, "s": res["samples"].get(a, 0),
+                         "su": res["settled"], "sn": res["settled_n"]})
+            return res["factors"], "measured"
+    except Exception as exc:
+        print(f"  [attribution] could not measure factors for {brand}: {exc} - using fallback")
+    return dict(ATTRIBUTION_FALLBACK), "fallback"
+
+
+def _newest_complete_date(engine, brand):
+    """Newest report date that is fully loaded, or None. The scraper loads a
+    day over ~10-70 minutes, sometimes overlapping the scheduled run, and a
+    half-loaded day understates spend AND sales - far worse than lag. A date
+    counts as complete when its row count is at least 90% of the median of
+    the days before it."""
+    cnt = pd.read_sql(text("""
+        SELECT TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')::date AS d, COUNT(*) AS n
+        FROM voylla."Blinkit_Ads_Report"
+        WHERE "Brand" = :brand
+          AND TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS') >= CURRENT_DATE - INTERVAL '12 days'
+          AND TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS') <= CURRENT_DATE - INTERVAL '1 day'
+        GROUP BY 1 ORDER BY 1 DESC"""), engine, params={"brand": brand})
+    for i in range(len(cnt)):
+        prior = cnt["n"].iloc[i + 1:i + 8]
+        if len(prior) >= 3 and cnt["n"].iloc[i] >= 0.9 * float(prior.median()):
+            return cnt["d"].iloc[i]
+    return None
+
+
 def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
     """Same windowed aggregation as the scheduled pipeline's Phase 0, scoped
     to a single campaign so an on-demand click stays fast and cheap."""
+    from datetime import timedelta as _td
+    as_of = _newest_complete_date(engine, brand)
+    if as_of is None:                                   # fall back to the old, blind buffer
+        as_of = pd.read_sql("SELECT CURRENT_DATE AS d", engine)["d"].iloc[0] - _td(days=3)
+    as_of_sql = pd.Timestamp(as_of).strftime("%Y-%m-%d")
     query = f"""
   WITH base AS (
         SELECT
@@ -1852,9 +2016,9 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
         ON a."Campaign ID"::TEXT = cp.campaign_id::TEXT AND a."Targeting Value" = cp.keyword AND cp."Brand"= '{brand}'
         LEFT JOIN voylla."Blinkit_keyword_suggestions" ks ON a."Targeting Value" = ks.keyword AND ks.brand_name = '{brand}'
         WHERE TO_TIMESTAMP(a."Date", 'YYYY-MM-DD HH24:MI:SS')
-              >= (CURRENT_DATE - INTERVAL '3 day') - INTERVAL '31 days'
+              >= DATE '{as_of_sql}' - INTERVAL '31 days'
           AND TO_TIMESTAMP(a."Date", 'YYYY-MM-DD HH24:MI:SS')
-              <= (CURRENT_DATE - INTERVAL '3 day')
+              <= DATE '{as_of_sql}'
           AND a."Brand" = '{brand}'
           AND a."Campaign ID"::TEXT = '{campaign_id}'
 
@@ -1931,6 +2095,16 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
     df["report_date"] = pd.to_datetime(df["report_date"])
     today = df["report_date"].max()
 
+    # Scale each day's sales to its estimated settled value (spend is final
+    # from day one; only sales keep growing). Raw sales are kept so the AI
+    # can see both and so zero-sale days stay visibly zero (0 x factor = 0).
+    db_today = pd.Timestamp(pd.read_sql("SELECT CURRENT_DATE AS d", engine)["d"].iloc[0])
+    factors, factor_source = get_attribution_factors(engine, brand)
+    df["age_days"] = (db_today - df["report_date"]).dt.days
+    df["attr_factor"] = df["age_days"].map(lambda a: factors.get(int(a), 1.0)).astype(float)
+    df["total_sales_raw"] = df["total_sales"].astype(float)
+    df["total_sales"] = df["total_sales_raw"] * df["attr_factor"]
+
     df1  = df[df["report_date"] >= today - pd.Timedelta(days=0)]
     df7  = df[df["report_date"] >= today - pd.Timedelta(days=6)]
     df15 = df[df["report_date"] >= today - pd.Timedelta(days=14)]
@@ -1952,6 +2126,17 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
         on=["campaign_id", "targeting"], how="left"
     )
     aggregated_df["spend_1d"] = aggregated_df["spend_1d"].fillna(0)
+
+    # Unadjusted ROAS exactly as Blinkit reports it today, for comparison.
+    def _raw_roas(dfw, days):
+        g = dfw.groupby(["Campaign ID", "Targeting Value"]).agg(
+            _s=("total_sales_raw", "sum"), _sp=("spend", "sum")).reset_index()
+        g[f"roas_{days}d_raw"] = (g["_s"].astype(float) / g["_sp"].astype(float)).replace(
+            [float("inf"), -float("inf")], 0).fillna(0).round(2)
+        return g.rename(columns={"Campaign ID": "campaign_id", "Targeting Value": "targeting"})[
+            ["campaign_id", "targeting", f"roas_{days}d_raw"]]
+    for _dfw, _d in ((df1, 1), (df7, 7)):
+        aggregated_df = aggregated_df.merge(_raw_roas(_dfw, _d), on=["campaign_id", "targeting"], how="left")
 
     budget_df = pd.read_sql(f"""
         SELECT
@@ -2000,7 +2185,7 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
     # same trailing ROAS as one converting steadily, and the two are not
     # equally trustworthy. See the CORE PHILOSOPHY "signal reliability" note.
     converting_days_df = (
-        df7[df7["total_sales"] > 0]
+        df7[df7["total_sales_raw"] > 0]
         .groupby(["Campaign ID", "Targeting Value"])["report_date"]
         .nunique()
         .reset_index()
@@ -2034,9 +2219,9 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
         SELECT SUM("Estimated Budget Consumed") AS campaign_spend
         FROM voylla."Blinkit_Ads_Report" a
         WHERE TO_TIMESTAMP("Date",'YYYY-MM-DD HH24:MI:SS')
-              > (CURRENT_DATE - INTERVAL '3 day') - INTERVAL '7 days'
+              > DATE '{as_of_sql}' - INTERVAL '7 days'
           AND TO_TIMESTAMP(a."Date", 'YYYY-MM-DD HH24:MI:SS')
-              <= (CURRENT_DATE - INTERVAL '3 day')
+              <= DATE '{as_of_sql}'
           AND a."Brand" = '{brand}' AND a."Campaign ID"::TEXT = '{campaign_id}'
     """, engine)
     campaign_spend = float(campaign_spend_df["campaign_spend"].iloc[0] or 0)
@@ -2048,6 +2233,9 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
         "aggregated_df": aggregated_df,
         "campaign_name": campaign_name,
         "campaign_spend": campaign_spend,
+        "data_as_of": today,
+        "factors": factors,
+        "factor_source": factor_source,
     }
 
 
@@ -2276,7 +2464,17 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
         """
         system_blocks = [KEYWORD_POOL_BLOCK]
     else:
+        _f_list = ", ".join(f"{a}d old x{f:.2f}" for a, f in sorted(data["factors"].items()) if f > 1.0 and a <= 5) or "none"
+        _asof = pd.Timestamp(data["data_as_of"]).strftime("%Y-%m-%d")
+        attribution_line = (
+            f"DATA RUN NOTE: data runs through {_asof} (newest fully-loaded day). "
+            f"Sales on recent days are scaled to their estimated settled value using "
+            f"{'factors re-measured today from Blinkit day-1 snapshots vs current figures' if data['factor_source'] == 'measured' else 'FALLBACK flat factors (not enough history to measure) - treat the adjusted figures as rougher'}: "
+            f"{_f_list}. roas_*_raw fields are the unadjusted figures."
+        )
         user_message = f"""
+        {attribution_line}
+
         The `action` field is YOUR final call. `rule_action` (the signed-off v3 Rule
         Decision) is your STRONG DEFAULT in BOTH directions — follow it unless the
         numbers give you a specific reason not to, and say so explicitly when you diverge.
@@ -2373,6 +2571,7 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
             row["keyword_budget_pct_7d"]    = orig.get("keyword_budget_pct_7d", None)
             for _fld in ("spend_1d", "spend_7d", "spend_15d", "spend_30d",
                          "roas_1d", "roas_7d", "roas_15d", "roas_30d",
+                         "roas_1d_raw", "roas_7d_raw",
                          "position", "most_viewed_position", "impressions",
                          "keyword_searches", "search_volume_tier",
                          "campaign_budget_7d", "campaign_spend"):
