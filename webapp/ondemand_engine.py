@@ -1932,14 +1932,14 @@ def compute_attribution_factors(engine, brand):
 
 
 def get_attribution_factors(engine, brand):
-    """(factors, source). Re-measured at most once every 20 hours, stored in
+    """(factors, source). Re-measured on the first run of each calendar day, stored in
     voylla.blinkit_attribution_factors so it can be inspected; falls back to
     flat defaults rather than failing a run."""
     try:
         _ensure_attribution_tables(engine)
         cached = pd.read_sql(text("""
             SELECT age_days, factor FROM voylla.blinkit_attribution_factors
-            WHERE brand = :brand AND updated_at > NOW() - INTERVAL '20 hours'"""),
+            WHERE brand = :brand AND updated_at::date = CURRENT_DATE"""),
             engine, params={"brand": brand})
         if not cached.empty:
             return {int(r.age_days): float(r.factor) for r in cached.itertuples()}, "measured"
