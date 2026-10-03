@@ -107,6 +107,15 @@ DECISION_MODEL_OVERRIDE = None
 DECISION_MODEL_BY_CAMPAIGN = {"296464": "claude-sonnet-5-5"}
 SHADOW_MODEL_BY_CAMPAIGN = {"296464": "claude-haiku-4-5-20251001"}
 
+# Bid step size: the AI chooses it as a percent of current CPM; Python holds
+# these hard limits. Raises are capped tighter than cuts because a raise is
+# what spends money. The campaign's own tolerance % (Mode settings) still
+# applies on top, and DECREASE never goes below the floor.
+MAX_RAISE_PCT = 15
+MAX_CUT_PCT = 20
+MAX_STEP_RUPEES = 80
+DEFAULT_STEP_PCT = 10
+
 # USD per million tokens (input, output), platform.claude.com pricing, Oct 2026.
 MODEL_PRICES = {
     "claude-sonnet-5-5": (2.0, 10.0),
@@ -475,7 +484,7 @@ def build_keyword_explanation(row, llm_reasoning, rule_action, rule_tag,
     else:
         rec_line = f"LLM action matches the rule."
     # Applied CPM move — makes the floor clamp visible instead of silently
-    # showing a smaller-than-10% bid_change with no explanation.
+    # showing a smaller-than-asked bid_change with no explanation.
     _step = _f(row.get("cpm_change"))
     if final_action == "INCREASE_CPM" and _step > 0:
         _new = cpm + _step
@@ -483,8 +492,8 @@ def build_keyword_explanation(row, llm_reasoning, rule_action, rule_tag,
     elif final_action == "DECREASE_CPM" and _step > 0:
         _new = cpm - _step
         _move = f"CPM: ₹{cpm:,.0f} → ₹{_new:,.0f}  (−₹{_step:,.0f})"
-        if abs(_new - floor) < 1e-6 and abs(_step - round(cpm * 0.10)) >= 1:
-            _move += f"  [clamped: a full 10% cut would breach the ₹{floor:,.0f} floor]"
+        if abs(_new - floor) < 1e-6:
+            _move += f"  [clamped at the ₹{floor:,.0f} floor]"
     else:
         _move = f"CPM unchanged at ₹{cpm:,.0f}"
 
@@ -1190,7 +1199,7 @@ SYSTEM_PROMPT = """
     Output: scratchpad lines first, then the JSON array.
 
     Confidence should be mandatory
-    cpm_change: percentage of CPM change.
+    cpm_change: percent of current CPM to move (see Field rules).
 
     Each JSON object must contain ALL of these fields in this exact order:
 
@@ -1226,7 +1235,13 @@ SYSTEM_PROMPT = """
     Field rules:
       campaign_id         : use the campaign_id value from CURRENT DATA
       campaign_name       : use the campaign_name value from CURRENT DATA
-      cpm_change          : 10 for INCREASE_CPM / DECREASE_CPM. 0 for NO_CHANGE / PAUSE.
+      cpm_change          : the size of the bid move as a PERCENT of current_cpm (integer).
+                            You choose it. 5 = cautious nudge, 10 = normal step, up to 15 for a
+                            raise or 20 for a cut when the evidence is strong (e.g. bid_response
+                            shows a clearly wasted climb). Python caps raises at 15%, cuts at 20%,
+                            any single move at Rs80, and never cuts below the floor. A bigger
+                            step needs a bigger reason - say why in the explanation.
+                            0 for NO_CHANGE / PAUSE.
       confidence : MANDATORY. Calculate using CONFIDENCE SCORING rules above.
              Output as decimal (e.g. 0.80, not 80). Never null. Never 0.0 as default.
              If unsure → floor is 0.70. Maximum is 0.95. Never 1.0.
@@ -1292,7 +1307,7 @@ SYSTEM_PROMPT = """
       3. action            → one of: INCREASE_CPM / DECREASE_CPM / NO_CHANGE / PAUSE.
       4. explanation       → string (4-section || delimited format)
       5. campaign_name     → string (from CURRENT DATA)
-      6. cpm_change        → integer: 10 for INCREASE/DECREASE, 0 for NO_CHANGE/PAUSE
+      6. cpm_change        → integer percent, 1-20 for INCREASE/DECREASE (raise max 15), 0 for NO_CHANGE/PAUSE
       7. confidence        → decimal between 0.70–0.95 (from scratchpad CONFIDENCE value)
       8. alternative_keywords → list ([] unless action = PAUSE)
       9.  current_cpm
@@ -1578,6 +1593,7 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
                         action          = "DECREASE_CPM"
                         a["action"]     = "DECREASE_CPM"
                         a["cpm_change"] = round(check_cpm_z * 0.10)
+                        a["cpm_change_pct"] = DEFAULT_STEP_PCT   # Python override: fixed 10% step
                         _expl = a.get("explanation", "")
                         _expl = re.sub(
                             r"Final Recommendation:\s*NO_CHANGE[^|]*",
@@ -1639,6 +1655,7 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
                     action          = "DECREASE_CPM"
                     a["action"]     = "DECREASE_CPM"
                     a["cpm_change"] = round(_cpm_ls * 0.10)
+                    a["cpm_change_pct"] = DEFAULT_STEP_PCT   # Python override: fixed 10% step
                     _expl_ls = a.get("explanation", "")
                     _expl_ls = re.sub(
                         r"Final Recommendation:\s*NO_CHANGE[^|]*",
@@ -1669,15 +1686,30 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
                 cpm_change      = 0
                 a["cpm_change"] = 0
 
-            # Universal bid_change correction (10% of current_cpm)
+            # Step size: the AI's chosen percent (cpm_change_pct), held inside
+            # hard limits. Rows with no AI percent (Python overrides, skipped
+            # keywords, older callers) keep the old 10% step.
             if action in ("DECREASE_CPM", "INCREASE_CPM"):
                 try:
                     _cpm_val = float(current_cpm) if current_cpm is not None else None
                     if _cpm_val and _cpm_val > 0:
-                        _correct_change = round(_cpm_val * 0.10)
-                        if cpm_change != _correct_change:
-                            cpm_change      = _correct_change
-                            a["cpm_change"] = _correct_change
+                        _pct = _f(a.get("cpm_change_pct"))
+                        if not _pct or _pct <= 0:
+                            _pct = DEFAULT_STEP_PCT
+                        _cap_pct = MAX_RAISE_PCT if action == "INCREASE_CPM" else MAX_CUT_PCT
+                        _notes = []
+                        if _pct > _cap_pct:
+                            _notes.append(f"AI asked {_pct:.0f}%, capped at {_cap_pct}%")
+                            _pct = _cap_pct
+                        _rupees = max(1, round(_cpm_val * _pct / 100.0))
+                        if _rupees > MAX_STEP_RUPEES:
+                            _notes.append(f"Rs{_rupees} capped at Rs{MAX_STEP_RUPEES} per move")
+                            _rupees = MAX_STEP_RUPEES
+                        cpm_change      = _rupees
+                        a["cpm_change"] = _rupees
+                        if _notes:
+                            a["explanation"] = a.get("explanation", "") + " | STEP GUARD: " + "; ".join(_notes) + "."
+                            explanation = a["explanation"]
                 except (TypeError, ValueError):
                     pass
 
@@ -1705,14 +1737,14 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
                     _cpm_fg   = float(current_cpm) if current_cpm is not None else None
                     _floor_fg = float(a.get("cpm_floor") or 200)
                     if _cpm_fg is not None and _floor_fg and _cpm_fg > 0:
-                        _projected_cpm = _cpm_fg - round(_cpm_fg * 0.10)
+                        _projected_cpm = _cpm_fg - cpm_change
                         if _projected_cpm < _floor_fg:
                             _room = int(round(_cpm_fg - _floor_fg))
                             if _room >= 1:
                                 cpm_change      = _room
                                 a["cpm_change"] = _room
                                 _expl_fg = a.get("explanation", "")
-                                _expl_fg += (f" | FLOOR CLAMP: 10% would take CPM {_cpm_fg} -> {_projected_cpm}, "
+                                _expl_fg += (f" | FLOOR CLAMP: a cut of {_cpm_fg - _projected_cpm:.0f} would take CPM {_cpm_fg} -> {_projected_cpm}, "
                                              f"below floor {_floor_fg}; cut clamped to {_room} so CPM lands on the floor.")
                                 a["explanation"] = _expl_fg
                                 explanation = _expl_fg
@@ -2786,6 +2818,7 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
                 continue
             row["campaign_id"]   = campaign_id
             row["campaign_name"] = campaign_name
+            row["cpm_change_pct"] = row.get("cpm_change")   # AI answers in percent
             tkey = str(row.get("targeting", "")).strip().lower().replace(" ", "_")
             orig = row_lookup.get(tkey, {})
 
@@ -2828,6 +2861,7 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
             bf["campaign_name"] = campaign_name
             bf["action"]        = ra
             bf["cpm_change"]    = round(cpm * 0.10) if ra in ("INCREASE_CPM", "DECREASE_CPM") else 0
+            bf["cpm_change_pct"] = DEFAULT_STEP_PCT if ra in ("INCREASE_CPM", "DECREASE_CPM") else 0
             bf["confidence"]    = 0.70
             bf["alternative_keywords"] = []
             bf["_llm_missing"]  = True
