@@ -101,6 +101,68 @@ def extract_json(response: str) -> list:
 # Claude_api_key.txt (also used by chat and the Instamart/Zepto engines).
 DECISION_MODEL_OVERRIDE = None
 
+# Per-campaign live model, and a second model run on the same data purely for
+# comparison (never saved as an action). Both runs' decisions and token costs
+# go to voylla.blinkit_model_runs / voylla.blinkit_model_decisions.
+DECISION_MODEL_BY_CAMPAIGN = {"296464": "claude-sonnet-5-5"}
+SHADOW_MODEL_BY_CAMPAIGN = {"296464": "claude-haiku-4-5-20251001"}
+
+# USD per million tokens (input, output), platform.claude.com pricing, Oct 2026.
+MODEL_PRICES = {
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-opus-5-5": (4.0, 20.0),
+}
+
+
+def _model_cost_usd(model, in_tok, out_tok, cache_write=0, cache_read=0):
+    for k, (pi, po) in MODEL_PRICES.items():
+        if str(model).startswith(k):
+            return round((in_tok + 1.25 * cache_write + 0.1 * cache_read) / 1e6 * pi
+                         + out_tok / 1e6 * po, 5)
+    return None
+
+
+def _log_model_run(engine, brand, campaign_id, model, role, usage, rows):
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS voylla.blinkit_model_runs (
+                    run_id serial PRIMARY KEY, run_at timestamp NOT NULL DEFAULT NOW(),
+                    run_date date NOT NULL DEFAULT CURRENT_DATE, brand text, campaign_id text,
+                    model text, role text, input_tokens int, output_tokens int,
+                    cost_usd numeric, n_keywords int)"""))
+            conn.execute(text("""ALTER TABLE voylla.blinkit_model_runs
+                ADD COLUMN IF NOT EXISTS cache_write_tokens int,
+                ADD COLUMN IF NOT EXISTS cache_read_tokens int"""))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS voylla.blinkit_model_decisions (
+                    run_id int REFERENCES voylla.blinkit_model_runs(run_id), targeting text,
+                    action text, cpm_change int, rule_action text, current_cpm numeric,
+                    explanation text)"""))
+            in_tok = int(getattr(usage, "input_tokens", 0) or 0)
+            out_tok = int(getattr(usage, "output_tokens", 0) or 0)
+            cw = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+            cr = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+            run_id = conn.execute(text("""
+                INSERT INTO voylla.blinkit_model_runs
+                  (brand, campaign_id, model, role, input_tokens, output_tokens, cost_usd, n_keywords,
+                   cache_write_tokens, cache_read_tokens)
+                VALUES (:b, :c, :m, :r, :i, :o, :cost, :n, :cw, :cr) RETURNING run_id"""),
+                {"b": brand, "c": str(campaign_id), "m": model, "r": role, "i": in_tok, "o": out_tok,
+                 "cost": _model_cost_usd(model, in_tok, out_tok, cw, cr), "n": len(rows),
+                 "cw": cw, "cr": cr}).scalar()
+            for r in rows:
+                conn.execute(text("""
+                    INSERT INTO voylla.blinkit_model_decisions
+                      (run_id, targeting, action, cpm_change, rule_action, current_cpm, explanation)
+                    VALUES (:id, :t, :a, :cc, :ra, :cpm, :e)"""),
+                    {"id": run_id, "t": r.get("targeting"), "a": r.get("action"),
+                     "cc": _safe_int(r.get("cpm_change"), 0), "ra": r.get("rule_action"),
+                     "cpm": _f(r.get("current_cpm")), "e": str(r.get("explanation") or "")[:4000]})
+    except Exception as exc:
+        print(f"  [model-log] could not log {role} run for {campaign_id}: {exc}")
+
 
 def _temperature_kwargs(model):
     """Claude 5-family models reject `temperature`; older ones take 0 for
@@ -901,6 +963,12 @@ SYSTEM_PROMPT = """
            with them, the reverse holds - step back up.
          - A keyword that never converted at ANY level it has tried is the
            real PAUSE candidate.
+         - top_slot_days_7d = days in the last 7 the keyword already held
+           position 1. Position 1 is the ceiling: a raise cannot buy a better
+           slot, it only makes every view cost more. When top_slot_days_7d
+           covers most of active_days_7d, never raise. If sales are weak there,
+           the question is whether a LOWER bid would still hold the top slot -
+           test a decrease rather than holding at a price that buys nothing.
          - When rule_action is PAUSE but bid_response shows the keyword was
            profitable (ROAS around or above target) at a lower CPM it ran at
            recently, the rule is reacting to the damage the bid climb did, not
@@ -1588,7 +1656,14 @@ def _build_clean_rows(action_obj, brand, tolerance_pct=20):
                 _pos_check = float(a.get("most_viewed_position") or 99)
             except (TypeError, ValueError):
                 _pos_check = 99
-            if action == "INCREASE_CPM" and _pos_check == 1:
+            _top_days = _safe_int(a.get("top_slot_days_7d"), 0)
+            _act_days = max(_safe_int(a.get("active_days_7d"), 7), 1)
+            _at_top = _pos_check == 1 or _top_days * 2 > _act_days
+            if action == "INCREASE_CPM" and _at_top:
+                a["explanation"] = (a.get("explanation", "") +
+                    f" | PYTHON GUARD: already at position 1 on {_top_days} of {_act_days} active days - "
+                    f"a higher bid cannot buy a better slot, raise blocked.")
+                explanation = a["explanation"]
                 action          = "NO_CHANGE"
                 a["action"]     = "NO_CHANGE"
                 cpm_change      = 0
@@ -2238,6 +2313,19 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
     aggregated_df = aggregated_df.merge(converting_days_df, on=["campaign_id", "targeting"], how="left")
     aggregated_df["converting_days_7d"] = aggregated_df["converting_days_7d"].fillna(0).clip(upper=7).astype(int)
 
+    # Days the keyword already held the #1 slot. A bid raise cannot buy a
+    # better position than 1, so on a keyword that sits at #1 most days a
+    # raise only makes every view more expensive.
+    _top = df7[df7["spend"] > 0].groupby(["Campaign ID", "Targeting Value", "report_date"])[
+        "most_viewed_position"].min().reset_index()
+    top_df = (_top[_top["most_viewed_position"].astype(float) <= 1]
+              .groupby(["Campaign ID", "Targeting Value"])["report_date"].nunique().reset_index()
+              .rename(columns={"Campaign ID": "campaign_id", "Targeting Value": "targeting",
+                               "report_date": "top_slot_days_7d"}))
+    top_df["campaign_id"] = top_df["campaign_id"].astype(str).str.strip()
+    aggregated_df = aggregated_df.merge(top_df, on=["campaign_id", "targeting"], how="left")
+    aggregated_df["top_slot_days_7d"] = aggregated_df["top_slot_days_7d"].fillna(0).clip(upper=7).astype(int)
+
     keyword_constants_df = (
         df.groupby(["Campaign ID", "Targeting Value"])
         .agg(
@@ -2504,7 +2592,7 @@ def fetch_active_campaign_ids(engine, brand):
     return df["campaign_id"].tolist()
 
 
-def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
+def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_override=None, dry_run=False):
     """
     One synchronous call: fetch this campaign's rolling window data, run the
     same deterministic rule engine + LLM decision as the scheduled pipeline,
@@ -2558,7 +2646,8 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
 
     cfg = get_anthropic_config()
     client = anthropic_sdk.Anthropic(api_key=cfg["api_key"])
-    model = DECISION_MODEL_OVERRIDE or cfg.get("model") or "claude-haiku-4-5-20251001"
+    model = (model_override or DECISION_MODEL_BY_CAMPAIGN.get(campaign_id)
+             or DECISION_MODEL_OVERRIDE or cfg.get("model") or "claude-haiku-4-5-20251001")
 
     keyword_pool_records = _fetch_keyword_pool(engine)
     KEYWORD_POOL_BLOCK = {
@@ -2566,6 +2655,9 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
         "text": ("KEYWORD POOL — the ONLY source for alternative_keywords (used when "
                   "action = PAUSE). Sorted by weighted_score desc.\n"
                   + json.dumps(clean_nan(keyword_pool_records))),
+        # The pool and system prompt are identical for every campaign in a
+        # run, so cache them: later calls within 5 minutes read them at 10%.
+        "cache_control": {"type": "ephemeral"},
     }
 
     insufficient = campaign_spend < SPEND_THRESHOLD
@@ -2718,6 +2810,7 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
             row["low_search_zero_roas"] = orig.get("low_search_zero_roas", False)
             row["high_budget_low_roas"] = orig.get("high_budget_low_roas", False)
             row["active_days_7d"]       = orig.get("active_days_7d", 7)
+            row["top_slot_days_7d"]     = orig.get("top_slot_days_7d", 0)
             row["most_viewed_position"] = orig.get("most_viewed_position") or orig.get("position", 99)
 
         # backfill any keyword the LLM skipped, using the deterministic rule
@@ -2744,8 +2837,29 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
     import queries
     tolerance_pct = float(queries.fetch_autonomy_setting(campaign_id, brand)["bid_tolerance_pct"])
 
-    rows = save_ondemand_action(engine, suggestion_response, brand, requested_by=requested_by, tolerance_pct=tolerance_pct)
-    return {"ok": True, "count": len(rows), "rows": rows, "error": None}
+    if dry_run:
+        rows = _build_clean_rows(suggestion_response, brand, tolerance_pct=tolerance_pct)
+    else:
+        rows = save_ondemand_action(engine, suggestion_response, brand, requested_by=requested_by, tolerance_pct=tolerance_pct)
+
+    usage = getattr(resp, "usage", None)
+    _log_model_run(engine, brand, campaign_id, model,
+                   "shadow" if (dry_run and model_override) else ("dry_run" if dry_run else "live"),
+                   usage, rows)
+
+    # Same data, second model, nothing saved - a daily side-by-side comparison.
+    # Scheduled run only, so a manual click in the dashboard isn't twice as slow.
+    shadow = SHADOW_MODEL_BY_CAMPAIGN.get(campaign_id)
+    if not dry_run and shadow and shadow != model and requested_by == "daily_scheduled":
+        try:
+            generate_ondemand_suggestions(brand, campaign_id, requested_by="shadow",
+                                          model_override=shadow, dry_run=True)
+        except Exception as exc:
+            print(f"  [shadow] {shadow} comparison failed for {campaign_id}: {exc}")
+
+    return {"ok": True, "count": len(rows), "rows": rows, "error": None, "model": model,
+            "input_tokens": getattr(usage, "input_tokens", None),
+            "output_tokens": getattr(usage, "output_tokens", None)}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
