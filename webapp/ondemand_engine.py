@@ -97,6 +97,18 @@ def extract_json(response: str) -> list:
     raise ValueError(f"Could not parse JSON after all attempts. Last 100 chars: {response[-100:]}")
 
 
+# Model for Blinkit bid decisions only. None = the shared model in
+# Claude_api_key.txt (also used by chat and the Instamart/Zepto engines).
+DECISION_MODEL_OVERRIDE = None
+
+
+def _temperature_kwargs(model):
+    """Claude 5-family models reject `temperature`; older ones take 0 for
+    repeatable decisions."""
+    m = str(model or "")
+    return {"temperature": 0} if m.startswith(("claude-3", "claude-haiku-4", "claude-sonnet-4", "claude-opus-4")) else {}
+
+
 def aggregate_window(df, days):
     agg = df.groupby(['Campaign ID', 'Targeting Value']).agg({
         'spend':               'sum',
@@ -872,6 +884,33 @@ SYSTEM_PROMPT = """
        how large the adjustment is this run - if it is large, the recent edge
        is leaning heavily on an estimate.
 
+    8. Learn from what your own bid moves bought - this is your memory and it
+       needs no waiting. Each row's bid_response lays the keyword's own daily
+       results against the CPM it was running at: views per day, position,
+       spend, sales, ROAS and converting days for every CPM level it has run at
+       recently, plus the net effect from the first level to the latest. Read it
+       before every decision, especially before repeating a move:
+         - Paying more is only worth it if it bought something: more views,
+           a better position, or more sales. If CPM climbed and views/position
+           stayed flat while ROAS fell, the extra bid bought nothing - the
+           intelligent move is DECREASE_CPM back toward the cheapest level that
+           delivered the same views and sales. Holding just keeps paying the
+           higher price, and PAUSING throws away a keyword that was profitable
+           at a lower bid.
+         - If a lower CPM clearly lost views or position and the sales went
+           with them, the reverse holds - step back up.
+         - A keyword that never converted at ANY level it has tried is the
+           real PAUSE candidate.
+         - When rule_action is PAUSE but bid_response shows the keyword was
+           profitable (ROAS around or above target) at a lower CPM it ran at
+           recently, the rule is reacting to the damage the bid climb did, not
+           to the keyword itself. Choose DECREASE_CPM, not PAUSE: walk the bid
+           back toward the level that worked and let the next cycles confirm.
+           Pausing is right only if it also failed at the lower levels.
+       If your conclusion disagrees with rule_action, say so with the bid_response
+       numbers - that is a specific numeric reason. Do not hold just because the
+       data looks mixed; mixed data with a clearly wasted increase is a decrease.
+
     When you DO override the rule, you must state it explicitly:
       "Rule Decision: PAUSE | LLM Action: NO_CHANGE — overriding because [specific
        numeric reason]." An override without a concrete reason is not allowed.
@@ -883,7 +922,7 @@ SYSTEM_PROMPT = """
       4. 15-day / 7-day ROAS trend
       5. Signal reliability (converting_days_7d vs active_days_7d)
       6. Raw vs adjusted ROAS at the recent edge (attribution lag)
-      7. Previous recommendation outcome
+      7. Previous recommendation outcome and bid_response (what each CPM level bought)
 
 
     ═══════════════════════════════════════════════════════════════
@@ -2234,6 +2273,7 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
         "campaign_name": campaign_name,
         "campaign_spend": campaign_spend,
         "data_as_of": today,
+        "daily_df": df,
         "factors": factors,
         "factor_source": factor_source,
     }
@@ -2257,11 +2297,100 @@ def _fetch_ondemand_history(engine, brand, campaign_id):
     return pd.read_sql(f"""
         SELECT unique_key, campaign_id, campaign_name, targeting, action,
                bid_change, confidence, explanation, action_date,
-               user_implemented, override_note
+               user_implemented, override_note, current_cpm
         FROM voylla.blinkit_ondemand_actions
         WHERE "Brand" = '{brand}' AND campaign_id = '{campaign_id}'
         ORDER BY action_date DESC;
     """, engine)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BID RESPONSE  (learning from what each CPM level actually bought)
+# ══════════════════════════════════════════════════════════════════════════════
+# The outcome grader waits 7 days after a change, so a keyword that is moved
+# every other day is never graded and the AI never learns from it (jhumke was
+# raised 8 times, Rs 200 -> 428, with no grade ever coming back). This needs no
+# waiting: lay the keyword's own daily data against the CPM it was running at
+# that day, so the AI can see directly whether paying more bought more views,
+# a better slot, or more sales - and step back when it didn't.
+
+def _cpm_by_day(days, hist_kw, live_cpm):
+    """CPM in force at the END of each report day = the current_cpm recorded
+    by the next suggestion run after that day (runs happen almost daily)."""
+    h = hist_kw.dropna(subset=["current_cpm"]).sort_values("action_date")
+    dates = [pd.Timestamp(d) for d in h["action_date"]]
+    cpms = [float(c) for c in h["current_cpm"]]
+    out = {}
+    for d in days:
+        cpm = None
+        for ad, c in zip(dates, cpms):
+            if ad > d:
+                cpm = c
+                break
+        out[d] = cpm if cpm is not None else (float(live_cpm) if live_cpm else None)
+    return out
+
+
+def build_bid_response(daily_kw, hist_kw, live_cpm, min_days=4):
+    """One compact text block, or "" when there is nothing to compare."""
+    if daily_kw.empty or hist_kw.empty:
+        return ""
+    d = daily_kw.groupby("report_date").agg(
+        spend=("spend", "sum"), sales=("total_sales", "sum"),
+        imp=("impressions", "sum"), units=("total_units", "sum"),
+        pos=("most_viewed_position", "median")).reset_index().sort_values("report_date")
+    d["spend"] = d["spend"].astype(float); d["sales"] = d["sales"].astype(float)
+    d["imp"] = d["imp"].astype(float); d["pos"] = d["pos"].astype(float)
+    cpm_map = _cpm_by_day(list(d["report_date"]), hist_kw, live_cpm)
+    d["cpm"] = d["report_date"].map(cpm_map)
+    d = d.dropna(subset=["cpm"])
+    if d["cpm"].nunique() < 2:
+        return ""
+
+    # consecutive runs at one CPM, then merge short runs so each band has
+    # enough days to mean something (single days are mostly noise)
+    runs = []
+    for _, r in d.iterrows():
+        if runs and runs[-1]["cpms"][-1] == r["cpm"]:
+            runs[-1]["rows"].append(r)
+            runs[-1]["cpms"].append(r["cpm"])
+        else:
+            runs.append({"cpms": [r["cpm"]], "rows": [r]})
+    bands = []
+    for run in runs:
+        if bands and len(bands[-1]["rows"]) < min_days:
+            bands[-1]["rows"] += run["rows"]
+            bands[-1]["cpms"] += run["cpms"]
+        else:
+            bands.append({"cpms": list(run["cpms"]), "rows": list(run["rows"])})
+    if len(bands) > 1 and len(bands[-1]["rows"]) < 2:
+        bands[-2]["rows"] += bands[-1]["rows"]
+        bands[-2]["cpms"] += bands[-1]["cpms"]
+        bands.pop()
+    if len(bands) < 2:
+        return ""
+
+    def _band(b):
+        rows = pd.DataFrame(b["rows"])
+        n = len(rows)
+        lo, hi = min(b["cpms"]), max(b["cpms"])
+        cpm_txt = f"Rs{lo:.0f}" if lo == hi else f"Rs{lo:.0f}-{hi:.0f}"
+        sp, sa = float(rows["spend"].sum()), float(rows["sales"].sum())
+        roas = sa / sp if sp > 0 else 0.0
+        return {
+            "txt": (f"{cpm_txt} ({rows['report_date'].min():%b %d}-{rows['report_date'].max():%b %d}, {n}d): "
+                    f"{rows['imp'].sum() / n:.0f} views/day, position~{rows['pos'].median():.0f}, "
+                    f"spend Rs{sp:.0f}, sales Rs{sa:.0f}, ROAS {roas:.2f}, "
+                    f"sold on {int((rows['sales'] > 0).sum())}/{n} days"),
+            "cpm": hi, "vpd": rows["imp"].sum() / n, "roas": roas, "pos": rows["pos"].median(),
+        }
+    info = [_band(b) for b in bands]
+    first, last = info[0], info[-1]
+    summary = (f"Net effect, first band -> latest: CPM {first['cpm']:.0f} -> {last['cpm']:.0f} "
+               f"({(last['cpm'] / first['cpm'] - 1) * 100:+.0f}%), views/day "
+               f"{first['vpd']:.0f} -> {last['vpd']:.0f}, position~{first['pos']:.0f} -> ~{last['pos']:.0f}, "
+               f"ROAS {first['roas']:.2f} -> {last['roas']:.2f}.")
+    return "BID RESPONSE (oldest first; sales lag-adjusted): " + " | ".join(i["txt"] for i in info) + " | " + summary
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2418,11 +2547,18 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
             notes_text = " | ".join(f"NOTE ({n['entity_type']}): {n['text']}" for n in notes)
             row["previous_summary"] += f" | {notes_text}"
         row["previous_history"] = prev["previous_history"]
+        _daily = data["daily_df"]
+        _hist = history_df[history_df["targeting"].astype(str).str.strip().str.lower()
+                                .str.replace(" ", "_") == targeting_key]
+        row["bid_response"] = build_bid_response(
+            _daily[_daily["Targeting Value"].astype(str).str.strip().str.lower()
+                       .str.replace(" ", "_") == targeting_key],
+            _hist, row.get("current_cpm"))
         inject_python_flags(row)
 
     cfg = get_anthropic_config()
     client = anthropic_sdk.Anthropic(api_key=cfg["api_key"])
-    model = cfg.get("model") or "claude-haiku-4-5-20251001"
+    model = DECISION_MODEL_OVERRIDE or cfg.get("model") or "claude-haiku-4-5-20251001"
 
     keyword_pool_records = _fetch_keyword_pool(engine)
     KEYWORD_POOL_BLOCK = {
@@ -2489,6 +2625,8 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
         -> Each row contains two fields:
            "previous_summary" -> copy this verbatim into the explanation "Previous:" section.
            "previous_history" -> use this list for Step 5 decision-making (newest first).
+        -> "bid_response" -> what each recent CPM level actually bought (see CORE PHILOSOPHY 8).
+           Quote its numbers in ANALYSIS whenever it is present.
         -> Do NOT repeat an action flagged with LOOP in previous_summary.
         -> Do NOT cross-reference history between keywords.
         -> If previous_summary contains "| OUTCOME: ...", that is a grade of whether your
@@ -2530,11 +2668,11 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None):
         resp = client.messages.create(
             model=model,
             max_tokens=12000,
-            temperature=0,
+            **_temperature_kwargs(model),
             system=system_blocks,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw_response = resp.content[0].text
+        raw_response = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
         suggestion_response = extract_json(raw_response)
     except Exception as e:
         return {"ok": False, "count": 0, "rows": [], "error": f"LLM call failed: {e}"}
