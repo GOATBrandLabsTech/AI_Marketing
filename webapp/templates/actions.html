@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}Pending Actions - Blinkit Control{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-7 flex-wrap gap-3">
+  <div>
+    <h1 class="page-title text-2xl font-bold text-ink">Pending Actions</h1>
+    {% if chooser %}
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Pick a brand to review its AI recommendations.</p>
+    {% else %}
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">
+      {{ rows|length }}{% if action_filter %} of {{ total_count }}{% endif %} on-demand AI recommendations &middot; {{ brand }}, most recent first.
+      Accept, adjust the CPM change, or override the action entirely.
+    </p>
+    {% endif %}
+  </div>
+  <div class="flex items-center gap-3">
+    <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
+      {% for ch in channels %}
+      <a href="{{ url_for('actions', brand=brand, channel=ch) }}" data-soft
+         class="text-xs font-semibold px-3.5 py-2 transition"
+         style="{{ 'background:var(--brand);color:#fff;' if ch == channel else 'color:var(--ink-2);' }}">{{ ch }}</a>
+      {% endfor %}
+    </div>
+    {% if not chooser and action_dates %}
+    <form method="get" data-soft>
+      <input type="hidden" name="brand" value="{{ brand }}">
+      <input type="hidden" name="channel" value="{{ channel }}">
+      {% if action_filter %}<input type="hidden" name="action" value="{{ action_filter }}">{% endif %}
+      <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Action date</label>
+      <select name="date" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+        <option value="">All dates</option>
+        {% for d in action_dates %}
+        <option value="{{ d }}" {{ 'selected' if d == date_filter else '' }}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if not chooser %}
+<div class="mb-4">
+  <input type="text" id="campaignFilterInput" oninput="filterActionsByCampaign()" placeholder="Filter by campaign name or ID&hellip;"
+         class="w-full max-w-md rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+  <span id="campaignFilterCount" class="text-xs ml-2" style="color:var(--ink-muted)"></span>
+</div>
+{% endif %}
+
+{% if not chooser and action_counts %}
+{% set action_colors = {
+  'NO_CHANGE':     {'bg': '#eeeeec', 'fg': 'var(--ink-2)',    'dot': '#c3c2b7'},
+  'INCREASE_CPM':  {'bg': 'var(--brand-50)', 'fg': 'var(--brand-dark)', 'dot': 'var(--brand)'},
+  'DECREASE_CPM':  {'bg': '#fef3e2', 'fg': '#8a5a00',          'dot': 'var(--warning)'},
+  'PAUSE':         {'bg': '#fbeaea', 'fg': '#9c2626',          'dot': 'var(--critical)'},
+  'ZOMBIE_FLAG':   {'bg': '#efeafb', 'fg': '#5b3fb8',          'dot': '#4a3aa7'},
+} %}
+<div class="mb-6">
+  <div class="text-sm font-semibold text-ink mb-3">By action <span class="font-normal" style="color:var(--ink-muted)">&mdash; click to filter</span></div>
+  <div class="flex flex-wrap gap-3">
+    <a href="{{ url_for('actions', brand=brand, channel=channel, date=date_filter) }}" data-soft
+       class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not action_filter else '' }}">
+      <div class="font-display text-xl font-bold text-ink">{{ total_count }}</div>
+      <div class="text-xs" style="color:var(--ink-muted)">All</div>
+    </a>
+    {% for name, count in action_counts.items()|sort(attribute='1', reverse=true) %}
+    {% set c = action_colors.get(name, {'bg': '#f2f2f0', 'fg': 'var(--ink-muted)', 'dot': '#d5d4cf'}) %}
+    <a href="{{ url_for('actions', brand=brand, channel=channel, action=name, date=date_filter) }}" data-soft
+       class="card px-4 py-3 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px ' ~ c.dot if action_filter == name else '' }}">
+      <div class="font-display text-xl font-bold" style="color:{{ c.fg }}">{{ count }}</div>
+      <div class="text-xs flex items-center gap-1.5" style="color:var(--ink-muted)"><span class="w-1.5 h-1.5 rounded-full" style="background:{{ c.dot }}"></span>{{ name }}</div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if chooser %}
+<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  {% for c in chooser %}
+  <a href="{{ url_for('actions', brand=c.brand, channel=channel) }}" data-soft class="card p-5 block transition hover:shadow-md" style="border-color:var(--ring)">
+    <div class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">{{ c.brand }}</div>
+    <div class="font-display text-2xl font-bold text-ink">{{ c.count }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">on-demand recommendations</div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div id="bulkBar" class="hidden mb-4 card p-3 flex items-center justify-between" style="border-color:var(--brand)">
+  <div class="text-sm font-medium text-ink"><span id="bulkCount">0</span> selected</div>
+  <div class="flex gap-2">
+    <button onclick="clearSelection()" class="text-xs font-semibold px-3 py-1.5 rounded-lg transition" style="color:var(--ink-2)">Clear</button>
+    <button onclick="bulkAccept()" class="text-white text-xs font-semibold rounded-lg px-3.5 py-2 transition" style="background:var(--brand);"
+            onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">Accept selected</button>
+  </div>
+</div>
+<div class="card overflow-hidden">
+  <div class="overflow-x-auto max-h-[75vh]">
+    <table class="data w-full text-sm" id="actionsTable">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-4 py-3 w-8"><input type="checkbox" id="selectAllChk" onchange="toggleSelectAll(this)" class="w-4 h-4 rounded" style="accent-color:var(--brand)"></th>
+          <th class="px-4 py-3">Campaign</th>
+          <th class="px-4 py-3">Keyword</th>
+          <th class="px-4 py-3">AI action</th>
+          <th class="px-4 py-3 text-right">CPM</th>
+          <th class="px-4 py-3 text-right">Confidence</th>
+          <th class="px-4 py-3">Status</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="border-b" style="border-color:var(--grid)" data-search="{{ (r.campaign_name ~ ' ' ~ r.campaign_id)|lower }}" data-key="{{ r.unique_key }}">
+          <td class="px-4 py-2.5"><input type="checkbox" class="row-chk w-4 h-4 rounded" style="accent-color:var(--brand)" data-key="{{ r.unique_key }}" onchange="updateBulkBar()"></td>
+          <td class="px-4 py-2.5 font-medium">{{ r.campaign_name }}</td>
+          <td class="px-4 py-2.5">{{ r.targeting }}{% if r.match_type %} <span class="text-xs" style="color:var(--ink-muted)">({{ r.match_type|replace('KEYWORD_MATCH_TYPE_', '')|lower }})</span>{% endif %}</td>
+          <td class="px-4 py-2.5 whitespace-nowrap">
+            {{ r.action }}
+            {% if r.rule_action and r.rule_action != '' and r.rule_action != r.action %}
+              <span class="badge" style="background:#fef3e2;color:#8a5a00;" title="Rule engine wanted {{ r.rule_action }}"><span class="dot" style="background:var(--warning)"></span>diverged</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right whitespace-nowrap">{{ r.current_cpm if (r.current_cpm is defined and r.current_cpm is not none) else r.current_cpc }}{% if r.bid_change %} <span style="color:var(--ink-muted)">(&Delta;{{ r.bid_change }})</span>{% endif %}</td>
+          <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.confidence if r.confidence is not none else '-' }}</td>
+          <td class="px-4 py-2.5">
+            {% if r.override_note and 'auto-accepted' in r.override_note %}<span class="badge" style="background:#e6f0ff;color:#0a4a9c;" title="{{ r.override_note }}"><span class="dot" style="background:#0a4a9c"></span>&#129302; auto-accepted</span>
+            {% elif r.override_action %}<span class="badge" style="background:#efeafb;color:#5b3fb8;"><span class="dot" style="background:#4a3aa7"></span>override: {{ r.override_action }}</span>
+            {% elif r.user_implemented == 'true' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>accepted</span>
+            {% elif r.user_implemented == 'false' %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>rejected</span>
+            {% else %}<span class="badge" style="background:#f2f2f0;color:var(--ink-muted);"><span class="dot" style="background:#d5d4cf"></span>undecided</span>{% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right">
+            <button onclick="toggleRow('row-{{ r.unique_key }}')" class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)" onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'">Review</button>
+          </td>
+        </tr>
+        <tr id="row-{{ r.unique_key }}" class="hidden" style="background:var(--plane)">
+          <td colspan="8" class="px-5 py-5">
+            <div class="mb-4 max-w-3xl space-y-2">
+              {% for step in r.explanation|steps %}
+              <div class="text-xs leading-relaxed pl-3 py-0.5" style="color:var(--ink-2); border-left:2px solid var(--ring)">{{ step }}</div>
+              {% else %}
+              <div class="text-xs" style="color:var(--ink-muted)">No explanation recorded.</div>
+              {% endfor %}
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="card p-4">
+                <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Accept AI recommendation</div>
+                <label class="flex items-center gap-2 text-sm mb-3">
+                  <input type="checkbox" id="accept-chk-{{ r.unique_key }}" {{ 'checked' if r.user_implemented == 'true' else '' }} class="w-4 h-4 rounded" style="accent-color:var(--brand)">
+                  Implement as-is
+                </label>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">CPM override %</label>
+                <input type="number" step="0.1" id="accept-cpm-{{ r.unique_key }}" value="{{ r.cpm_llm_override if r.cpm_llm_override is not none else '' }}"
+                       class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Note</label>
+                <textarea id="accept-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">{{ r.override_note or '' }}</textarea>
+                <button class="text-white text-xs font-semibold rounded-lg px-3.5 py-2 transition" style="background:var(--brand);"
+                        onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'"
+                        onclick="submitAccept('{{ r.unique_key }}')">Save</button>
+              </div>
+              <div class="card p-4">
+                <div class="text-xs font-bold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">Override action</div>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">New action</label>
+                <select id="override-action-{{ r.unique_key }}" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                  {% for opt in action_options %}
+                  <option value="{{ opt }}" {{ 'selected' if opt == r.override_action else '' }}>{{ opt }}</option>
+                  {% endfor %}
+                </select>
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">CPM change %</label>
+                <input type="number" step="0.1" id="override-cpm-{{ r.unique_key }}" value="{{ r.cpm_change_user if r.cpm_change_user is not none else '' }}"
+                       class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">
+                <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Note</label>
+                <textarea id="override-note-{{ r.unique_key }}" rows="2" class="w-full rounded-lg border text-sm px-3 py-2 mb-3" style="border-color:var(--ring)">{{ r.override_note or '' }}</textarea>
+                <button class="text-white text-xs font-semibold rounded-lg px-3.5 py-2 transition" style="background:#1c1d20;"
+                        onmouseover="this.style.background='#000'" onmouseout="this.style.background='#1c1d20'"
+                        onclick="submitOverride('{{ r.unique_key }}')">Save override</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No on-demand suggestions yet - generate one from the On-Demand AI page.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+var BRAND = {{ brand|tojson }}; // var, not const: this script re-runs on every soft-nav
+var CHANNEL = {{ channel|tojson }};
+
+async function submitAccept(key) {
+  const accept = document.getElementById('accept-chk-' + key).checked;
+  const cpm = document.getElementById('accept-cpm-' + key).value;
+  const note = document.getElementById('accept-note-' + key).value;
+  await postJSON(`/api/ondemand/${encodeURIComponent(key)}/accept`, {
+    brand: BRAND, channel: CHANNEL, accept, cpm_llm_override: cpm === '' ? null : Number(cpm), note,
+  });
+  toast('Saved', true);
+  setTimeout(() => location.reload(), 600);
+}
+
+function filterActionsByCampaign() {
+  const q = document.getElementById('campaignFilterInput').value.trim().toLowerCase();
+  const rows = document.querySelectorAll('#actionsTable tbody tr[data-search]');
+  let visible = 0;
+  rows.forEach(tr => {
+    const match = !q || tr.dataset.search.includes(q);
+    tr.style.display = match ? '' : 'none';
+    const detail = document.getElementById('row-' + tr.dataset.key);
+    if (detail && !match) detail.classList.add('hidden');
+    if (match) visible++;
+  });
+  document.getElementById('campaignFilterCount').textContent = q ? `${visible} of ${rows.length} match` : '';
+}
+
+function toggleSelectAll(chk) {
+  document.querySelectorAll('.row-chk').forEach(c => { c.checked = chk.checked; });
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const checked = document.querySelectorAll('.row-chk:checked');
+  const all = document.querySelectorAll('.row-chk');
+  document.getElementById('bulkBar').classList.toggle('hidden', checked.length === 0);
+  document.getElementById('bulkCount').textContent = checked.length;
+  const selectAll = document.getElementById('selectAllChk');
+  if (selectAll) selectAll.checked = all.length > 0 && checked.length === all.length;
+}
+
+function clearSelection() {
+  document.querySelectorAll('.row-chk').forEach(c => { c.checked = false; });
+  updateBulkBar();
+}
+
+async function bulkAccept() {
+  const keys = [...document.querySelectorAll('.row-chk:checked')].map(c => c.dataset.key);
+  if (keys.length === 0) return;
+  if (!confirm(`Accept ${keys.length} recommendation(s) as-is? This cannot be bulk-undone.`)) return;
+  await postJSON('/api/ondemand/bulk_accept', { brand: BRAND, channel: CHANNEL, unique_keys: keys });
+  toast(`Accepted ${keys.length}`, true);
+  setTimeout(() => location.reload(), 600);
+}
+
+async function submitOverride(key) {
+  const action = document.getElementById('override-action-' + key).value;
+  const cpm = document.getElementById('override-cpm-' + key).value;
+  const note = document.getElementById('override-note-' + key).value;
+  await postJSON(`/api/ondemand/${encodeURIComponent(key)}/override`, {
+    brand: BRAND, channel: CHANNEL, override_action: action, cpm_change_user: cpm === '' ? null : Number(cpm), note,
+  });
+  toast('Override saved', true);
+  setTimeout(() => location.reload(), 600);
+}
+</script>
+{% endblock %}

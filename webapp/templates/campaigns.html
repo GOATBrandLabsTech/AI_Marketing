@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% block title %}Campaigns & Budget - Blinkit Control{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-7">
+  <div>
+    <h1 class="page-title text-2xl font-bold text-ink">Campaigns &amp; Budget</h1>
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Live campaign status plus the run-time windows that pace each campaign's budget.</p>
+  </div>
+  <a href="{{ url_for('campaigns_csv', brand=brand) }}"
+     class="text-xs font-semibold rounded-lg px-3.5 py-2 transition border" style="border-color:var(--ring); color:var(--ink-2)"
+     onmouseover="this.style.background='var(--plane)'" onmouseout="this.style.background='transparent'">
+    Download CSV
+  </a>
+</div>
+
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6" id="statusTiles">
+  <button type="button" onclick="filterByStatus('ACTIVE', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="ACTIVE">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--good)"></span>Active</div>
+    <div class="font-display text-2xl font-bold" style="color:var(--good)">{{ status_counts.get('ACTIVE', 0) }}</div>
+  </button>
+  <button type="button" onclick="filterByStatus('STOPPED,ON_HOLD', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="STOPPED,ON_HOLD">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--warning)"></span>Stopped / on hold</div>
+    <div class="font-display text-2xl font-bold" style="color:#8a5a00">{{ status_counts.get('STOPPED', 0) + status_counts.get('ON_HOLD', 0) }}</div>
+  </button>
+  <button type="button" onclick="filterByStatus('BUDGET_EXHAUSTED', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="BUDGET_EXHAUSTED">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span>Budget exhausted</div>
+    <div class="font-display text-2xl font-bold" style="color:var(--critical)">{{ status_counts.get('BUDGET_EXHAUSTED', 0) }}</div>
+  </button>
+  <button type="button" onclick="filterByStatus('', this)" class="card p-4 text-left transition hover:shadow-md" data-statuses="" style="box-shadow:0 0 0 2px var(--brand)">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:var(--ink-muted)"><span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span>Total campaigns</div>
+    <div class="font-display text-2xl font-bold text-ink">{{ rows|length }}</div>
+  </button>
+</div>
+
+<div class="mb-4">
+  <input type="text" id="campaignSearch" oninput="filterCampaigns()" placeholder="Search campaigns by name or ID&hellip;"
+         class="w-full max-w-md rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+  <span id="campaignSearchCount" class="text-xs ml-2" style="color:var(--ink-muted)"></span>
+</div>
+
+<div class="card overflow-hidden">
+  <div class="overflow-x-auto max-h-[75vh]">
+    <table class="data w-full text-sm" id="campaignsTable">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          {% if brand == ALL_BRANDS %}<th class="px-4 py-3" data-sortable>Brand</th>{% endif %}
+          <th class="px-4 py-3" data-sortable>Campaign</th>
+          <th class="px-4 py-3 text-right" data-sortable>Budget</th>
+          <th class="px-4 py-3" data-sortable>Status</th>
+          <th class="px-4 py-3" data-sortable>Mode</th>
+          <th class="px-4 py-3 text-right" data-sortable>Windows</th>
+          <th class="px-4 py-3" data-sortable>Next start</th>
+          <th class="px-4 py-3" data-sortable>Last end</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="border-b" style="border-color:var(--grid)" data-search="{{ (r.campaign_name ~ ' ' ~ r.campaign_id)|lower }}" data-status="{{ r.last_status or '' }}">
+          {% if brand == ALL_BRANDS %}<td class="px-4 py-2.5" style="color:var(--ink-2)">{{ r.brand }}</td>{% endif %}
+          <td class="px-4 py-2.5">
+            <div class="font-medium">{{ r.campaign_name }}</div>
+            <div class="text-xs" style="color:var(--ink-muted)">#{{ r.campaign_id }}</div>
+          </td>
+          <td class="px-4 py-2.5 text-right font-medium">{{ r.budget if r.budget is not none else '-' }}</td>
+          <td class="px-4 py-2.5" data-sort="{{ r.last_status or '' }}">
+            {% if r.last_status == 'BUDGET_EXHAUSTED' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>{{ r.last_status }}</span>
+            {% elif r.last_status in ['ON_HOLD','STOPPED'] %}<span class="badge" style="background:#fef3e2;color:#8a5a00;"><span class="dot" style="background:var(--warning)"></span>{{ r.last_status }}</span>
+            {% elif r.last_status == 'ACTIVE' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>{{ r.last_status }}</span>
+            {% elif r.last_status %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>{{ r.last_status }}</span>
+            {% else %}<span style="color:#d5d4cf">-</span>{% endif %}
+          </td>
+          <td class="px-4 py-2.5" data-sort="{{ r.autonomy_mode }}">
+            <select class="text-xs rounded-lg border px-2 py-1" style="border-color:var(--ring)"
+                    onchange="setMode('{{ r.campaign_id }}', '{{ r.brand }}', this.value, this)">
+              {% for m in ['auto','semi_auto','manual'] %}
+              <option value="{{ m }}" {{ 'selected' if r.autonomy_mode == m else '' }}>{{ {'auto':'Auto','semi_auto':'Semi-auto','manual':'Manual'}[m] }}</option>
+              {% endfor %}
+            </select>
+            {% if r.ondemand_managed %}
+            <a href="{{ url_for('ondemand', campaign_id=r.campaign_id) }}" data-soft class="badge mt-1" style="background:#eaf1fd;color:#1d5fc9;" title="Delinked from Blinkit_actions_llm - managed by the On-Demand AI engine only">
+              <span class="dot" style="background:#1d5fc9"></span>On-Demand
+            </a>
+            {% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right">{{ r.window_count }}</td>
+          <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.next_start or '-' }}</td>
+          <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.last_end or '-' }}</td>
+          <td class="px-4 py-2.5 text-right">
+            <button onclick="openSchedule('{{ r.campaign_id }}','{{ r.campaign_name|e }}','{{ r.brand }}')"
+                    class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)"
+                    onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'">Manage</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ 9 if brand == ALL_BRANDS else 8 }}" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No campaigns found for this brand.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="scheduleModal" class="hidden fixed inset-0 z-40 flex items-center justify-center p-4" style="background:rgba(11,11,11,.45); backdrop-filter:blur(2px);">
+  <div class="card w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
+    <div class="flex items-center justify-between mb-5">
+      <div>
+        <div class="text-lg font-bold text-ink" id="modalCampaignName"></div>
+        <div class="text-xs font-semibold uppercase tracking-wide" style="color:var(--ink-muted)">Budget windows</div>
+      </div>
+      <button onclick="closeSchedule()" class="text-xl leading-none w-8 h-8 rounded-lg flex items-center justify-center transition" style="color:var(--ink-muted)"
+              onmouseover="this.style.background='var(--plane)'" onmouseout="this.style.background='transparent'">&times;</button>
+    </div>
+    <div id="scheduleEntries" class="space-y-3"></div>
+    <button onclick="addWindow()" class="mt-4 text-white text-xs font-semibold rounded-lg px-4 py-2.5 transition" style="background:var(--brand);"
+            onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">+ Add window</button>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>initSortableTable('campaignsTable');</script>
+<script>
+async function setMode(campaignId, brand, mode, selectEl) {
+  const prev = selectEl.dataset.prev || selectEl.value;
+  if (mode === 'auto' && !confirm(
+    'Auto mode means the AI accepts and pushes its own bid recommendations for this campaign with no human review. Continue?'
+  )) {
+    selectEl.value = prev;
+    return;
+  }
+  try {
+    await postJSON(`/api/campaigns/${encodeURIComponent(campaignId)}/mode`, { brand, mode });
+    selectEl.dataset.prev = mode;
+    toast('Mode updated', true);
+  } catch (e) {
+    selectEl.value = prev;
+  }
+}
+
+var statusFilter = ''; // var, not let: this script re-runs on every soft-nav
+
+function filterByStatus(statuses, tileEl) {
+  statusFilter = statuses;
+  document.querySelectorAll('#statusTiles [data-statuses]').forEach(t => {
+    t.style.boxShadow = (t === tileEl) ? '0 0 0 2px var(--brand)' : '';
+  });
+  filterCampaigns();
+}
+
+function filterCampaigns() {
+  const q = document.getElementById('campaignSearch').value.trim().toLowerCase();
+  const statuses = statusFilter ? statusFilter.split(',') : null;
+  const rows = document.querySelectorAll('#campaignsTable tbody tr[data-search]');
+  let shown = 0;
+  rows.forEach(row => {
+    const matchQ = !q || row.dataset.search.includes(q);
+    const matchStatus = !statuses || statuses.includes(row.dataset.status);
+    const match = matchQ && matchStatus;
+    row.classList.toggle('hidden', !match);
+    if (match) shown++;
+  });
+  const countEl = document.getElementById('campaignSearchCount');
+  countEl.textContent = (q || statusFilter) ? `${shown} of ${rows.length} campaigns` : '';
+}
+
+var currentCampaignId = null; // var, not let: this script re-runs on every soft-nav
+var currentBrand = null;
+
+function entryTemplate(e) {
+  const hours = [...Array(25).keys()];
+  const opt = (v, sel) => `<option value="${v}" ${Number(sel)===v?'selected':''}>${String(v).padStart(2,'0')}:00</option>`;
+  return `
+  <div class="rounded-xl p-4" style="border:1px solid var(--ring)" data-entry="${e.entry_id}">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+      <div>
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">From</label>
+        <input type="date" class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" value="${e.start_date || ''}" data-field="start_date">
+      </div>
+      <div>
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">To</label>
+        <input type="date" class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" value="${e.end_date || ''}" data-field="end_date">
+      </div>
+      <div>
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Start hour</label>
+        <select class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" data-field="start_hour">
+          ${hours.slice(0,24).map(h => opt(h, e.start_hour)).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">End hour</label>
+        <select class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" data-field="end_hour">
+          ${hours.slice(1).map(h => opt(h, e.end_hour)).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-semibold block mb-1" style="color:var(--ink-muted)">Budget</label>
+        <input type="number" step="1" class="w-full rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)" value="${e.budget ?? ''}" data-field="budget">
+      </div>
+    </div>
+    <div class="flex items-center justify-between">
+      <span class="badge" style="background:var(--plane);color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>${e.status || 'PENDING'}</span>
+      <div class="flex gap-2">
+        <button class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)" onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'" onclick="saveWindow('${e.entry_id}')">Save</button>
+        <button class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--critical)" onmouseover="this.style.background='#fbeaea'" onmouseout="this.style.background='transparent'" onclick="removeWindow('${e.entry_id}')">Remove</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function openSchedule(campaignId, campaignName, brand) {
+  currentCampaignId = campaignId;
+  currentBrand = brand;
+  document.getElementById('modalCampaignName').textContent = campaignName;
+  document.getElementById('scheduleModal').classList.remove('hidden');
+  await refreshEntries();
+}
+
+function closeSchedule() {
+  document.getElementById('scheduleModal').classList.add('hidden');
+}
+
+async function refreshEntries() {
+  const res = await fetch(`/api/schedule/${encodeURIComponent(currentCampaignId)}`);
+  const data = await res.json();
+  const el = document.getElementById('scheduleEntries');
+  el.innerHTML = data.entries.length
+    ? data.entries.map(entryTemplate).join('')
+    : `<div class="text-sm text-center py-6" style="color:var(--ink-muted)">No windows yet.</div>`;
+}
+
+function readEntry(container) {
+  const field = (name) => container.querySelector(`[data-field="${name}"]`).value;
+  return {
+    start_date: field('start_date'),
+    end_date: field('end_date'),
+    start_hour: Number(field('start_hour')),
+    end_hour: Number(field('end_hour')),
+    budget: field('budget') === '' ? null : Number(field('budget')),
+  };
+}
+
+async function saveWindow(entryId) {
+  const container = document.querySelector(`[data-entry="${entryId}"]`);
+  const payload = readEntry(container);
+  payload.campaign_id = currentCampaignId;
+  try {
+    await postJSON(`/api/schedule/entry/${encodeURIComponent(entryId)}/save`, payload);
+    toast('Window saved', true);
+    await refreshEntries();
+  } catch (e) { /* toast already shown */ }
+}
+
+async function removeWindow(entryId) {
+  try {
+    await postJSON(`/api/schedule/entry/${encodeURIComponent(entryId)}/remove`, {});
+    toast('Window removed', true);
+    await refreshEntries();
+  } catch (e) { /* toast already shown */ }
+}
+
+async function addWindow() {
+  try {
+    await postJSON(`/api/schedule/${encodeURIComponent(currentCampaignId)}/add`, {
+      campaign_name: document.getElementById('modalCampaignName').textContent,
+      brand: currentBrand,
+    });
+    await refreshEntries();
+  } catch (e) { /* toast already shown */ }
+}
+</script>
+{% endblock %}

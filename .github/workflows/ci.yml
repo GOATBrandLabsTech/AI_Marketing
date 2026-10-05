@@ -1,0 +1,47 @@
+# CI for Marketing Control.
+#
+# Every push and every pull request: install the app, make sure every Python
+# file compiles, and run the safety-rule tests in webapp/tests (made-up data
+# only: no database, no Anthropic, no Blinkit). Shows a tick or a cross on
+# GitHub.
+#
+# Deployment is NOT done from here. The Lightsail server's own webhook deploy
+# (/home/ubuntu/deploy-ai-marketing.sh) pulls the pushed commit, runs the same
+# tests, and only restarts the app if they pass - otherwise it stays on the
+# previous commit and emails the pytest output. No server key lives in GitHub.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: webapp/requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r webapp/requirements.txt
+
+      - name: Every Python file compiles
+        run: python -m compileall -q webapp
+
+      - name: Safety-rule tests
+        working-directory: webapp
+        run: python -m pytest tests -q

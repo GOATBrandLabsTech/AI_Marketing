@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% block title %}ROAS Impact - Blinkit Control{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-7">
+  <div>
+    <h1 class="page-title text-2xl font-bold text-ink">ROAS Impact</h1>
+    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Did the agent's recommendation actually help? 7 days before vs. 7 days after each action.</p>
+  </div>
+  <a href="{{ url_for('roas_csv', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), verdict=verdict, search=search) }}"
+     class="text-xs font-semibold rounded-lg px-3.5 py-2 transition border" style="border-color:var(--ring); color:var(--ink-2)"
+     onmouseover="this.style.background='var(--plane)'" onmouseout="this.style.background='transparent'">
+    Download CSV
+  </a>
+</div>
+
+{% if channel %}
+<div class="rounded-2xl p-6 mb-6 relative overflow-hidden" style="background:linear-gradient(135deg,#101a2b,#152847 55%,#1c3660); box-shadow:0 8px 24px rgba(16,26,43,.25);">
+  <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
+    <div>
+      <div class="inline-flex items-center gap-1.5 badge mb-2" style="background:rgba(255,255,255,.12);color:#bcd4f7;">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:#3987e5"></span> CHANNEL ROAS
+      </div>
+      <h2 class="font-display text-xl font-bold text-white">{{ brand }}'s overall performance{{ ' (AI showcase campaigns)' if channel.scoped_to_showcase else '' }}</h2>
+      <p class="text-sm mt-1 max-w-2xl" style="color:#9fb3d1">
+        The whole channel's actual spend and sales, not just the keywords the AI touched. Pick the date a change went live, and how many days either side to compare.
+      </p>
+      {% if channel.decisions_on_cutover == 0 %}
+      <div class="mt-3 max-w-2xl text-xs rounded-lg px-3 py-2" style="background:rgba(240,180,60,.15); color:#f5c975; border:1px solid rgba(240,180,60,.3);">
+        <strong>Heads up:</strong> nobody accepted or overridden anything on {{ channel.cutover_date }} for {{ brand }} —
+        every recommendation from that date is still undecided. The before/after split below reflects the channel's
+        organic movement around that date, not an AI-driven change.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <form method="get" data-soft class="flex flex-wrap items-end gap-3 mb-4">
+    <input type="hidden" name="brand" value="{{ brand }}">
+    <input type="hidden" name="since_days" value="{{ since_days }}">
+    <div>
+      <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Action date (cutover)</label>
+      <select name="cutover" onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+        {% for d in action_dates %}
+        <option value="{{ d }}" {{ 'selected' if d == channel.cutover_date|string else '' }} style="color:#111">{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Compare window</label>
+      <select name="window_days" onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+        {% for d in [3,7,14,30] %}
+        <option value="{{ d }}" {{ 'selected' if d == channel.window_days else '' }} style="color:#111">{{ d }} days each side</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex rounded-lg overflow-hidden border" style="border-color:rgba(255,255,255,.15)">
+      {% for g in ['day','week','month'] %}
+      <button type="submit" name="granularity" value="{{ g }}" class="text-xs font-semibold px-3 py-1.5 capitalize"
+              style="{{ 'background:var(--brand);color:#fff;' if channel.granularity == g else 'background:rgba(255,255,255,.06);color:#9fb3d1;' }}">{{ g }}</button>
+      {% endfor %}
+    </div>
+  </form>
+
+  <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
+    <div style="height:220px"><canvas id="channelChart"></canvas></div>
+  </div>
+
+  <div class="grid sm:grid-cols-2 gap-4">
+    <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
+      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">Before &middot; {{ channel.window_days }} days up to {{ channel.cutover_date }}</div>
+      <div class="font-display text-2xl font-bold text-white">{{ channel.before_after.before.roas if channel.before_after.before.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span></div>
+      <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.before.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.before.sales) }} sales &middot; {{ channel.before_after.before.days }} days</div>
+    </div>
+    <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
+      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">{{ 'After' if channel.decisions_on_cutover else 'Since (nothing implemented)' }} &middot; {{ channel.cutover_date }}</div>
+      <div class="font-display text-2xl font-bold" style="color: {{ ('#3ddc6a' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas > channel.before_after.before.roas else '#ff8a80' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas < channel.before_after.before.roas else '#fff') if channel.decisions_on_cutover else '#fff' }}">
+        {{ channel.before_after.after.roas if channel.before_after.after.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span>
+      </div>
+      <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.after.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.after.sales) }} sales &middot; {{ channel.before_after.after.days }} days</div>
+    </div>
+  </div>
+
+  {% if channel.before_after.after_is_partial %}
+  <div class="rounded-lg mt-4 px-3 py-2.5 text-xs flex items-start gap-2" style="background:rgba(250,178,25,.12); color:#fddc9a;">
+    <svg class="w-4 h-4 flex-none mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+    <div>Only <strong>{{ channel.before_after.after.days }} of {{ channel.window_days }}</strong> "after" days have landed so far &mdash; and Blinkit revises the last ~2 days as more conversions come in. Treat this ROAS as provisional; it can still move once the full window and final data are in.</div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if brand_summary %}
+<div class="card p-5 mb-6">
+  <div class="text-sm font-semibold text-ink mb-3">Performance by brand</div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide" style="color:var(--ink-muted)">Brand</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Recs</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Improved</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Worsened</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Flat</th>
+          <th class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-right" style="color:var(--ink-muted)">Avg &Delta; ROAS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in brand_summary %}
+        <tr class="border-b" style="border-color:var(--grid)">
+          <td class="px-3 py-2 font-semibold">
+            <a href="{{ url_for('roas', brand=b.brand) }}" data-soft style="color:var(--brand)">{{ b.brand }}</a>
+          </td>
+          <td class="px-3 py-2 text-right">{{ b.total }}</td>
+          <td class="px-3 py-2 text-right font-semibold" style="color:var(--good)">{{ b.improved }}</td>
+          <td class="px-3 py-2 text-right font-semibold" style="color:var(--critical)">{{ b.worsened }}</td>
+          <td class="px-3 py-2 text-right" style="color:var(--ink-2)">{{ b.flat }}</td>
+          <td class="px-3 py-2 text-right font-semibold" style="color: {{ 'var(--good)' if b.avg_roas_change and b.avg_roas_change > 0 else 'var(--critical)' if b.avg_roas_change and b.avg_roas_change < 0 else 'var(--ink-muted)' }}">
+            {{ '%+.2f'|format(b.avg_roas_change) if b.avg_roas_change is not none else '-' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if brand != ALL_BRANDS %}
+<div class="mb-3">
+  <div class="text-sm font-semibold text-ink">Per-keyword recommendations</div>
+  <p class="text-xs" style="color:var(--ink-muted)">A different, narrower view: only the keywords the AI actually recommended a change for, each compared 7 days before its own action date vs. 7 days after. Click a tile below to filter the table.</p>
+</div>
+{% endif %}
+<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search) }}" data-soft class="card p-5 block transition hover:shadow-md {{ 'ring-2' if not verdict else '' }}" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not verdict else '' }}">
+    <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Recommendations</div>
+    <div class="font-display text-3xl font-extrabold text-ink">{{ kpi.total }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">since {{ since_date }} &middot; click to clear filter</div>
+  </a>
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='IMPROVED') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--good)' if verdict == 'IMPROVED' else '' }}">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
+      <span class="w-2 h-2 rounded-full" style="background:var(--good)"></span> Improved
+    </div>
+    <div class="font-display text-3xl font-extrabold" style="color:var(--good)">{{ kpi.improved }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+  </a>
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='WORSENED') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--critical)' if verdict == 'WORSENED' else '' }}">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
+      <span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span> Worsened
+    </div>
+    <div class="font-display text-3xl font-extrabold" style="color:var(--critical)">{{ kpi.worsened }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+  </a>
+  <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='FLAT') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--ink-muted)' if verdict == 'FLAT' else '' }}">
+    <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
+      <span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span> Flat
+    </div>
+    <div class="font-display text-3xl font-extrabold" style="color:var(--ink-2)">{{ kpi.flat }}</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+  </a>
+  <div class="card p-5">
+    <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Avg ROAS change</div>
+    <div class="font-display text-3xl font-extrabold" style="color: {{ 'var(--good)' if kpi.avg_roas_change and kpi.avg_roas_change > 0 else 'var(--critical)' if kpi.avg_roas_change and kpi.avg_roas_change < 0 else 'var(--ink-2)' }}">
+      {{ '%+.2f'|format(kpi.avg_roas_change) if kpi.avg_roas_change is not none else '-' }}
+    </div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">scoreable rows only</div>
+  </div>
+</div>
+
+{% if daily_series %}
+<div class="card p-5 mb-6">
+  <div class="flex items-center justify-between mb-3">
+    <div class="text-sm font-semibold text-ink">Recommendation verdicts over time <span class="font-normal" style="color:var(--ink-muted)">(count of keywords, not spend)</span></div>
+    <div class="flex items-center gap-4 text-xs" style="color:var(--ink-2)">
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--good)"></span>Improved</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--critical)"></span>Worsened</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:#c3c2b7"></span>Flat</span>
+    </div>
+  </div>
+  <div style="height:220px"><canvas id="verdictChart"></canvas></div>
+</div>
+{% endif %}
+
+<form method="get" data-soft class="card p-4 mb-6 flex flex-wrap items-end gap-4">
+  <input type="hidden" name="brand" value="{{ brand }}">
+  {% if channel %}<input type="hidden" name="cutover" value="{{ channel.cutover_date }}">{% endif %}
+  <div>
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Lookback window (before {{ channel.cutover_date if channel else 'today' }})</label>
+    <select name="since_days" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+      {% for d in [7,14,30,60,90] %}
+      <option value="{{ d }}" {{ 'selected' if d == since_days else '' }}>Last {{ d }} days</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Verdict</label>
+    <select name="verdict" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+      <option value="">All</option>
+      {% for v in ['IMPROVED','WORSENED','FLAT'] %}
+      <option value="{{ v }}" {{ 'selected' if v == verdict else '' }}>{{ v.title() }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="flex-1 min-w-[220px]">
+    <label class="text-xs font-semibold uppercase tracking-wide block mb-1.5" style="color:var(--ink-muted)">Search campaign / keyword</label>
+    <input type="text" name="search" value="{{ search or '' }}" placeholder="e.g. ear rings"
+           class="w-full rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+  </div>
+  <button class="text-white text-sm font-semibold rounded-lg px-5 py-2 transition" style="background:var(--brand);"
+          onmouseover="this.style.background='var(--brand-dark)'" onmouseout="this.style.background='var(--brand)'">Apply</button>
+</form>
+
+<div class="card overflow-hidden">
+  <div class="overflow-x-auto max-h-[65vh]">
+    <table class="data w-full text-sm" id="roasTable">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-4 py-3" data-sortable>Date</th>
+          {% if brand == ALL_BRANDS %}<th class="px-4 py-3" data-sortable>Brand</th>{% endif %}
+          <th class="px-4 py-3" data-sortable>Campaign</th>
+          <th class="px-4 py-3" data-sortable>Keyword</th>
+          <th class="px-4 py-3" data-sortable>Action</th>
+          <th class="px-4 py-3 text-right" data-sortable>CPM</th>
+          <th class="px-4 py-3 text-right" data-sortable>ROAS before</th>
+          <th class="px-4 py-3 text-right" data-sortable>ROAS after</th>
+          <th class="px-4 py-3 text-right" data-sortable>&Delta; ROAS</th>
+          <th class="px-4 py-3 text-right" data-sortable>&Delta; Spend</th>
+          <th class="px-4 py-3">Pushed?</th>
+          <th class="px-4 py-3" data-sortable>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="border-b" style="border-color:var(--grid)" title="{{ r.explanation or '' }}">
+          <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.action_date }}</td>
+          {% if brand == ALL_BRANDS %}<td class="px-4 py-2.5" style="color:var(--ink-2)">{{ r.Brand }}</td>{% endif %}
+          <td class="px-4 py-2.5 font-medium">{{ r.campaign_name }}</td>
+          <td class="px-4 py-2.5">
+            {{ r.targeting }}
+            {% if r.diverged %}<span class="badge ml-1" style="background:#fef3e2;color:#8a5a00;"><span class="dot" style="background:var(--warning)"></span>diverged</span>{% endif %}
+          </td>
+          <td class="px-4 py-2.5 whitespace-nowrap">{{ r.action }}</td>
+          <td class="px-4 py-2.5 text-right whitespace-nowrap font-medium" data-sort="{{ r.current_cpm }}">
+            {{ r.current_cpm }}{% if r.cpm_intended %} <span style="color:var(--ink-muted)">&rarr;</span> {{ r.cpm_intended }}{% endif %}
+          </td>
+          <td class="px-4 py-2.5 text-right">{{ r.roas_before if r.roas_before is not none else '-' }}</td>
+          <td class="px-4 py-2.5 text-right">{{ r.roas_after if r.roas_after is not none else '-' }}</td>
+          <td class="px-4 py-2.5 text-right font-bold" style="color: {{ 'var(--good)' if r.roas_change and r.roas_change > 0 else 'var(--critical)' if r.roas_change and r.roas_change < 0 else 'var(--ink-muted)' }}">
+            {{ r.roas_change if r.roas_change is not none else '-' }}
+          </td>
+          <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.spend_change if r.spend_change is not none else '-' }}</td>
+          <td class="px-4 py-2.5">
+            {% if r.was_implemented %}<span class="badge" style="background:var(--brand-50);color:var(--brand-dark);"><span class="dot" style="background:var(--brand)"></span>pushed</span>
+            {% else %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>proposed</span>{% endif %}
+          </td>
+          <td class="px-4 py-2.5" data-sort="{{ r.verdict or '' }}">
+            {% if r.verdict == 'IMPROVED' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>Improved</span>
+            {% elif r.verdict == 'WORSENED' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>Worsened</span>
+            {% elif r.verdict == 'FLAT' %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>Flat</span>
+            {% else %}<span style="color:#d5d4cf">-</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ 12 if brand == ALL_BRANDS else 11 }}" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No rows for this filter.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>initSortableTable('roasTable');</script>
+{% if daily_series or channel %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% endif %}
+{% if channel %}
+<script>
+(function() {
+const trend = {{ channel.trend|tojson }};
+const cutoverLabel = {{ channel.cutover_label|tojson }};
+const isDayView = {{ (channel.granularity == 'day')|tojson }};
+const hadDecisions = {{ ((channel.decisions_on_cutover or 0) > 0) | tojson }};
+
+// Week/month buckets can straddle the cutover date, so a clean before/after
+// color split only makes sense at day granularity - otherwise show one line.
+let datasets;
+if (isDayView) {
+  const cutoverIdx = trend.findIndex(d => d.label >= cutoverLabel);
+  const before = trend.map((d, i) => (cutoverIdx === -1 || i < cutoverIdx) ? d.roas : null);
+  const after = trend.map((d, i) => (cutoverIdx !== -1 && i >= cutoverIdx) ? d.roas : null);
+  if (cutoverIdx > 0) before[cutoverIdx] = trend[cutoverIdx].roas; // connect the segments visually
+  const afterColor = hadDecisions ? '#3987e5' : '#7d93b5';
+  const afterFill = hadDecisions ? 'rgba(57,135,229,.18)' : 'rgba(125,147,181,.12)';
+  datasets = [
+    { label: 'Before', data: before, borderColor: '#7d93b5', backgroundColor: 'rgba(125,147,181,.12)',
+      borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12, tension: .25, fill: true, spanGaps: true },
+    { label: hadDecisions ? 'After (AI)' : 'After (nothing implemented)', data: after, borderColor: afterColor, backgroundColor: afterFill,
+      borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12, tension: .25, fill: true, spanGaps: true },
+  ];
+} else {
+  datasets = [
+    { label: 'ROAS', data: trend.map(d => d.roas), borderColor: '#3987e5', backgroundColor: 'rgba(57,135,229,.15)',
+      borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12, tension: .25, fill: true, spanGaps: true },
+  ];
+}
+
+new Chart(document.getElementById('channelChart'), {
+  type: 'line',
+  data: {
+    labels: trend.map(d => d.label),
+    datasets,
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    hover: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: true, labels: { color: '#c7d5ea', boxWidth: 10, font: { size: 11 } } },
+      tooltip: {
+        mode: 'index', intersect: false, padding: 10, cornerRadius: 8,
+        callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y ?? '-'} ROAS` },
+      },
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#9fb3d1', font: { size: 10 }, maxRotation: 0, autoSkip: true } },
+      y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,.08)' }, ticks: { color: '#9fb3d1', font: { size: 10 } } },
+    }
+  }
+});
+})();
+</script>
+{% endif %}
+{% if daily_series %}
+<script>
+(function() {
+const daily = {{ daily_series|tojson }};
+new Chart(document.getElementById('verdictChart'), {
+  type: 'bar',
+  data: {
+    labels: daily.map(d => d.date),
+    datasets: [
+      { label: 'Improved', data: daily.map(d => d.improved), backgroundColor: '#0ca30c', borderRadius: 3, maxBarThickness: 22 },
+      { label: 'Worsened', data: daily.map(d => d.worsened), backgroundColor: '#d03b3b', borderRadius: 3, maxBarThickness: 22 },
+      { label: 'Flat', data: daily.map(d => d.flat), backgroundColor: '#c3c2b7', borderRadius: 3, maxBarThickness: 22 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    hover: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, padding: 10, cornerRadius: 8 } },
+    scales: {
+      x: { stacked: true, grid: { display: false }, ticks: { color: '#898781', font: { size: 11 } } },
+      y: { stacked: true, beginAtZero: true, grid: { color: '#e8e7e2' }, ticks: { color: '#898781', font: { size: 11 }, precision: 0 } },
+    }
+  }
+});
+})();
+</script>
+{% endif %}
+{% endblock %}
