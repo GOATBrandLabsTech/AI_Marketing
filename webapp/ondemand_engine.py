@@ -2647,6 +2647,11 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
 
     history_df = _fetch_ondemand_history(engine, brand, campaign_id)
     history_df["campaign_id"] = history_df["campaign_id"].astype(str)
+    # History means previous days only. Today's row is this run's own output
+    # (or the live run's, when this is the shadow comparison) - letting the
+    # model read it as "last action, 0d ago" biases the decision.
+    _today = pd.Timestamp(datetime.now().date())
+    history_df = history_df[pd.to_datetime(history_df["action_date"]) < _today]
 
     data_for_llm = aggregated_df.to_dict(orient="records")
     for row in data_for_llm:
