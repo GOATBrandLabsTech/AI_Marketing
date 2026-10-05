@@ -5,3 +5,4 @@ anthropic==0.94.1
 pandas>=2.0
 SQLAlchemy>=2.0
 gunicorn>=21.2
+pytest>=8.0

@@ -1,17 +1,16 @@
-# CI/CD for Marketing Control.
+# CI for Marketing Control.
 #
-# CI  - every push and every pull request: install the app, make sure every
-#       Python file compiles, and run the safety-rule tests in webapp/tests
-#       (made-up data only: no database, no Anthropic, no Blinkit).
-# CD  - only on a push to the deploy branch, and only after CI is green:
-#       log into the Lightsail server, pull that exact commit, restart the
-#       app and check it answers. A red check means nothing is deployed.
+# Every push and every pull request: install the app, make sure every Python
+# file compiles, and run the safety-rule tests in webapp/tests (made-up data
+# only: no database, no Anthropic, no Blinkit). Shows a tick or a cross on
+# GitHub.
 #
-# Deploy needs three repository secrets (Settings -> Secrets and variables ->
-# Actions): LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY. Until they are
-# set, the deploy job reports "skipped" and the checks still run.
+# Deployment is NOT done from here. The Lightsail server's own webhook deploy
+# (/home/ubuntu/deploy-ai-marketing.sh) pulls the pushed commit, runs the same
+# tests, and only restarts the app if they pass - otherwise it stays on the
+# previous commit and emails the pytest output. No server key lives in GitHub.
 
-name: CI/CD
+name: CI
 
 on:
   push:
@@ -20,11 +19,6 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  DEPLOY_BRANCH: claude/blinkit-agent-roas-analysis-c4de2b
-  APP_DIR: /home/ubuntu/blinkit-marketing-repo
-  SERVICE: blinkit-marketing
 
 jobs:
   checks:
@@ -43,7 +37,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -r webapp/requirements.txt pytest
+          pip install -r webapp/requirements.txt
 
       - name: Every Python file compiles
         run: python -m compileall -q webapp
@@ -51,42 +45,3 @@ jobs:
       - name: Safety-rule tests
         working-directory: webapp
         run: python -m pytest tests -q
-
-  deploy:
-    name: Deploy to Lightsail
-    needs: checks
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Deploy the tested commit
-        env:
-          HOST: ${{ secrets.LIGHTSAIL_HOST }}
-          USER: ${{ secrets.LIGHTSAIL_USER }}
-          KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-        run: |
-          if [ "${GITHUB_REF_NAME}" != "${DEPLOY_BRANCH}" ]; then
-            echo "Not the deploy branch (${GITHUB_REF_NAME}) - checks only, nothing deployed."
-            exit 0
-          fi
-          if [ -z "$KEY" ] || [ -z "$HOST" ] || [ -z "$USER" ]; then
-            echo "Deploy secrets are not set yet - skipping deploy."
-            exit 0
-          fi
-          mkdir -p ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/deploy_key "$USER@$HOST" \
-            "set -e
-             cd '$APP_DIR'
-             git fetch --quiet origin '$DEPLOY_BRANCH'
-             git merge --ff-only --quiet '$GITHUB_SHA'
-             test \"\$(git rev-parse HEAD)\" = '$GITHUB_SHA'
-             sudo systemctl restart '$SERVICE'
-             for i in 1 2 3 4 5 6 7 8 9 10; do
-               code=\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3002/login || true)
-               if [ \"\$code\" = 200 ]; then echo \"App is up on \$(git rev-parse --short HEAD)\"; exit 0; fi
-               sleep 3
-             done
-             echo 'App did not come back after restart'; sudo systemctl status '$SERVICE' --no-pager | tail -20; exit 1"
