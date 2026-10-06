@@ -47,6 +47,7 @@ def current_brand():
 
 
 CHANNELS = ["Blinkit", "Instamart", "Zepto"]
+SETTLING_DAYS = 3  # report days whose sales Blinkit is still adding to
 
 
 def current_channel():
@@ -201,7 +202,16 @@ def roas():
     if brand != queries.ALL_BRANDS:
         window_days = int(request.args.get("window_days", 7))
         granularity = request.args.get("granularity", "day")
-        campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" else None
+        # "ai" = only the campaigns the AI actually changes bids on (default
+        # whenever there are any); "all" = the whole channel. Comparing the
+        # whole channel before/after an AI date credits or blames the AI for
+        # campaigns it never touched.
+        ai_ids = (queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak"
+                  else queries.fetch_ai_managed_campaign_ids(brand))
+        scope = request.args.get("scope") or ("ai" if ai_ids else "all")
+        if scope not in ("ai", "all") or (scope == "ai" and not ai_ids):
+            scope = "all"
+        campaign_ids = ai_ids if scope == "ai" else None
 
         daily_channel = queries.fetch_channel_daily(brand, days=365, campaign_ids=campaign_ids)
         if granularity == "day":
@@ -228,7 +238,13 @@ def roas():
             "cutover_label": cutover_label,
             "window_days": window_days,
             "granularity": granularity,
-            "scoped_to_showcase": bool(campaign_ids),
+            "scoped_to_showcase": brand == "Chumbak" and scope == "ai",
+            "scope": scope,
+            "ai_campaign_count": len(ai_ids),
+            # Blinkit keeps adding sales to recent days (~30% for yesterday),
+            # so the last few points are drawn as still settling.
+            "settling_from": str(date.today() - timedelta(days=SETTLING_DAYS)),
+            "settling_days": SETTLING_DAYS,
             "decisions_on_cutover": queries.count_ondemand_decisions_on_date(brand, cutover_date),
         }
 
