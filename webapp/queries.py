@@ -247,6 +247,47 @@ ORDER BY a.action_date DESC, a.campaign_name, a.targeting
 """
 
 
+# A pushed change is judged on 7 full days of results, and only once Blinkit
+# has mostly finished adding late sales to the last of those days (3 more).
+VERDICT_AFTER_DAYS = 7
+VERDICT_SETTLE_DAYS = 3
+
+
+def annotate_verdict_readiness(rows, today=None):
+    """Adds, per row: status ('judged' | 'waiting' | 'not_pushed'),
+    verdict_on (the date a waiting row gets its verdict), and changed_again_on
+    (a later pushed change to the same keyword inside this row's 7-day
+    'after' window - that verdict then mixes two changes). Clears the verdict
+    of any row whose window isn't complete and settled yet: judging a change
+    on 1-2 days of results, before late sales land, mostly reads noise."""
+    today = today or date.today()
+    pushed = {}
+    for r in rows:
+        if r.get("was_implemented"):
+            pushed.setdefault((str(r["campaign_id"]), r["targeting"]), []).append(r["action_date"])
+    for r in rows:
+        d = r["action_date"]
+        if isinstance(d, str):
+            d = date.fromisoformat(d[:10])
+        r["verdict_on"] = d + timedelta(days=VERDICT_AFTER_DAYS + VERDICT_SETTLE_DAYS)
+        later = sorted(
+            x for x in pushed.get((str(r["campaign_id"]), r["targeting"]), [])
+            if d < (date.fromisoformat(x[:10]) if isinstance(x, str) else x) <= d + timedelta(days=VERDICT_AFTER_DAYS)
+        )
+        r["changed_again_on"] = later[0] if later and r.get("was_implemented") else None
+        if str(r.get("action") or "").upper() not in ("INCREASE_CPM", "DECREASE_CPM", "PAUSE"):
+            r["status"] = "hold"   # no bid change was proposed, so nothing to judge
+            r["verdict"] = None
+        elif not r.get("was_implemented"):
+            r["status"] = "not_pushed"
+        elif today >= r["verdict_on"]:
+            r["status"] = "judged"
+        else:
+            r["status"] = "waiting"
+            r["verdict"] = None
+    return rows
+
+
 def fetch_ondemand_roas_impact(brand, since_date, verdict=None, search=None):
     """Same shape as fetch_roas_impact, sourced from voylla.blinkit_ondemand_actions
     instead of Blinkit_actions_llm - "was_implemented" here means the independent
@@ -257,6 +298,7 @@ def fetch_ondemand_roas_impact(brand, since_date, verdict=None, search=None):
     with get_cursor() as cur:
         cur.execute(ONDEMAND_ROAS_IMPACT_SQL, {"brand": brand, "since": since_date})
         rows = cur.fetchall()
+    annotate_verdict_readiness(rows)
     if verdict:
         rows = [r for r in rows if r["verdict"] == verdict]
     if search:

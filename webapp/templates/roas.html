@@ -151,53 +151,57 @@
 {% if brand != ALL_BRANDS %}
 <div class="mb-3">
   <div class="text-sm font-semibold text-ink">Per-keyword recommendations</div>
-  <p class="text-xs" style="color:var(--ink-muted)">A different, narrower view: only the keywords the AI actually recommended a change for, each compared 7 days before its own action date vs. 7 days after. Click a tile below to filter the table.</p>
+  <p class="text-xs max-w-3xl" style="color:var(--ink-muted)">Each bid change the AI pushed to Blinkit, judged on its own keyword: 7 days before the change vs. 7 days after it. A change is judged {{ verdict_after_days + verdict_settle_days }} days after it went live (7 days of results, plus {{ verdict_settle_days }} days for Blinkit to finish adding late sales). Until then it shows <strong>Waiting</strong> with the date it will be judged. Changes that were only proposed, never pushed, are not judged.</p>
 </div>
 {% endif %}
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
   <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search) }}" data-soft class="card p-5 block transition hover:shadow-md {{ 'ring-2' if not verdict else '' }}" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not verdict else '' }}">
     <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Recommendations</div>
     <div class="font-display text-3xl font-extrabold text-ink">{{ kpi.total }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">since {{ since_date }} &middot; click to clear filter</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">since {{ since_date }}: {{ kpi.scoreable }} judged, {{ kpi.waiting }} waiting, {{ kpi.holds }} holds{{ ', ' ~ kpi.not_pushed ~ ' not pushed' if kpi.not_pushed else '' }}</div>
   </a>
   <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='IMPROVED') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--good)' if verdict == 'IMPROVED' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:var(--good)"></span> Improved
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--good)">{{ kpi.improved }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} judged &middot; click to filter</div>
   </a>
   <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='WORSENED') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--critical)' if verdict == 'WORSENED' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:var(--critical)"></span> Worsened
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--critical)">{{ kpi.worsened }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} judged &middot; click to filter</div>
   </a>
   <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=(channel.cutover_date if channel else none), search=search, verdict='FLAT') }}" data-soft class="card p-5 block transition hover:shadow-md" style="{{ 'box-shadow:0 0 0 2px var(--ink-muted)' if verdict == 'FLAT' else '' }}">
     <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">
       <span class="w-2 h-2 rounded-full" style="background:#c3c2b7"></span> Flat
     </div>
     <div class="font-display text-3xl font-extrabold" style="color:var(--ink-2)">{{ kpi.flat }}</div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} scoreable &middot; click to filter</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">of {{ kpi.scoreable }} judged &middot; click to filter</div>
   </a>
   <div class="card p-5">
     <div class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">Avg ROAS change</div>
     <div class="font-display text-3xl font-extrabold" style="color: {{ 'var(--good)' if kpi.avg_roas_change and kpi.avg_roas_change > 0 else 'var(--critical)' if kpi.avg_roas_change and kpi.avg_roas_change < 0 else 'var(--ink-2)' }}">
       {{ '%+.2f'|format(kpi.avg_roas_change) if kpi.avg_roas_change is not none else '-' }}
     </div>
-    <div class="text-xs mt-1" style="color:var(--ink-muted)">scoreable rows only</div>
+    <div class="text-xs mt-1" style="color:var(--ink-muted)">judged changes only</div>
   </div>
 </div>
 
 {% if daily_series %}
 <div class="card p-5 mb-6">
   <div class="flex items-center justify-between mb-3">
-    <div class="text-sm font-semibold text-ink">Recommendation verdicts over time <span class="font-normal" style="color:var(--ink-muted)">(count of keywords, not spend)</span></div>
+    <div>
+      <div class="text-sm font-semibold text-ink">Did each pushed change work? <span class="font-normal" style="color:var(--ink-muted)">(number of keyword changes per day, not spend)</span></div>
+      <div class="text-xs" style="color:var(--ink-muted)">Grey-blue = waiting: not enough days of results yet. Recent days are always waiting.</div>
+    </div>
     <div class="flex items-center gap-4 text-xs" style="color:var(--ink-2)">
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--good)"></span>Improved</span>
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:var(--critical)"></span>Worsened</span>
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:#c3c2b7"></span>Flat</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:#b9c8de"></span>Waiting</span>
     </div>
   </div>
   <div style="height:220px"><canvas id="verdictChart"></canvas></div>
@@ -267,11 +271,15 @@
             {{ r.current_cpm }}{% if r.cpm_intended %} <span style="color:var(--ink-muted)">&rarr;</span> {{ r.cpm_intended }}{% endif %}
           </td>
           <td class="px-4 py-2.5 text-right">{{ r.roas_before if r.roas_before is not none else '-' }}</td>
-          <td class="px-4 py-2.5 text-right">{{ r.roas_after if r.roas_after is not none else '-' }}</td>
-          <td class="px-4 py-2.5 text-right font-bold" style="color: {{ 'var(--good)' if r.roas_change and r.roas_change > 0 else 'var(--critical)' if r.roas_change and r.roas_change < 0 else 'var(--ink-muted)' }}">
-            {{ r.roas_change if r.roas_change is not none else '-' }}
+          <td class="px-4 py-2.5 text-right" data-sort="{{ r.roas_after if r.roas_after is not none else '' }}">
+            {% if r.roas_after is none %}<span style="color:var(--ink-muted)" title="No results after this date yet">-</span>
+            {% elif r.status == 'waiting' %}<span style="color:var(--ink-muted)" title="Partial: only {{ r.days_after }} of 7 days so far, and the newest days are still settling">{{ r.roas_after }}<span class="text-[10px]"> ({{ r.days_after }}/7 d)</span></span>
+            {% else %}{{ r.roas_after }}{% endif %}
           </td>
-          <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.spend_change if r.spend_change is not none else '-' }}</td>
+          <td class="px-4 py-2.5 text-right font-bold" style="color: {{ 'var(--ink-muted)' if r.status != 'judged' else 'var(--good)' if r.roas_change and r.roas_change > 0 else 'var(--critical)' if r.roas_change and r.roas_change < 0 else 'var(--ink-muted)' }}">
+            {{ (r.roas_change if r.status == 'judged' else '') if r.roas_change is not none else '-' }}
+          </td>
+          <td class="px-4 py-2.5 text-right" style="color:var(--ink-2)">{{ r.spend_change if (r.spend_change is not none and r.status == 'judged') else '' }}</td>
           <td class="px-4 py-2.5">
             {% if r.was_implemented %}<span class="badge" style="background:var(--brand-50);color:var(--brand-dark);"><span class="dot" style="background:var(--brand)"></span>pushed</span>
             {% else %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>proposed</span>{% endif %}
@@ -280,7 +288,11 @@
             {% if r.verdict == 'IMPROVED' %}<span class="badge" style="background:#e7f7e7;color:#0a6e0a;"><span class="dot" style="background:var(--good)"></span>Improved</span>
             {% elif r.verdict == 'WORSENED' %}<span class="badge" style="background:#fbeaea;color:#9c2626;"><span class="dot" style="background:var(--critical)"></span>Worsened</span>
             {% elif r.verdict == 'FLAT' %}<span class="badge" style="background:#eeeeec;color:var(--ink-2);"><span class="dot" style="background:#c3c2b7"></span>Flat</span>
+            {% elif r.status == 'waiting' %}<span class="badge" style="background:#eaf0f8;color:#43608a;" title="Needs 7 days of results plus {{ verdict_settle_days }} days for late sales"><span class="dot" style="background:#7d93b5"></span>Waiting &middot; judged {{ r.verdict_on.strftime('%d %b') }}</span>
+            {% elif r.status == 'hold' %}<span class="text-xs" style="color:var(--ink-muted)" title="The AI kept the bid as it was, so there is no change to judge">hold, nothing to judge</span>
+            {% elif r.status == 'not_pushed' %}<span class="text-xs" style="color:var(--ink-muted)" title="Proposed but never sent to Blinkit">not pushed, not judged</span>
             {% else %}<span style="color:#d5d4cf">-</span>{% endif %}
+            {% if r.changed_again_on %}<div class="text-[11px] mt-1" style="color:#8a5a00" title="Another pushed change to this keyword landed inside this change's 7-day after window, so the result mixes both changes">changed again {{ r.changed_again_on.strftime('%d %b') if r.changed_again_on.strftime is defined else r.changed_again_on }}</div>{% endif %}
           </td>
         </tr>
         {% else %}
@@ -369,6 +381,7 @@ new Chart(document.getElementById('verdictChart'), {
       { label: 'Improved', data: daily.map(d => d.improved), backgroundColor: '#0ca30c', borderRadius: 3, maxBarThickness: 22 },
       { label: 'Worsened', data: daily.map(d => d.worsened), backgroundColor: '#d03b3b', borderRadius: 3, maxBarThickness: 22 },
       { label: 'Flat', data: daily.map(d => d.flat), backgroundColor: '#c3c2b7', borderRadius: 3, maxBarThickness: 22 },
+      { label: 'Waiting', data: daily.map(d => d.waiting), backgroundColor: '#b9c8de', borderRadius: 3, maxBarThickness: 22 },
     ]
   },
   options: {
