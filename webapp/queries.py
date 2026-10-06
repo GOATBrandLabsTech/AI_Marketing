@@ -553,6 +553,24 @@ def fetch_channel_daily(brand, days=180, campaign_ids=None):
     return out
 
 
+def fetch_ai_managed_campaign_ids(brand):
+    """Campaigns where an on-demand AI decision actually reached Blinkit
+    (accepted and pushed). The channel ROAS panel scopes to these by default
+    so its "After (AI)" line describes campaigns the AI really changed - the
+    whole channel is ~35 campaigns and the AI may run only one of them."""
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT campaign_id
+            FROM voylla.blinkit_ondemand_actions
+            WHERE "Brand" = %(brand)s AND push_status = 'done'
+              AND campaign_id ~ '^[0-9]+$'
+            """,
+            {"brand": brand},
+        )
+        return sorted(int(r["campaign_id"]) for r in cur.fetchall())
+
+
 def bucket_channel_series(daily, granularity="day"):
     """Aggregates fetch_channel_daily's rows into week or month buckets -
     ROAS is always recomputed from summed spend/sales (spend-weighted), never
