@@ -170,7 +170,13 @@ def roas():
     cutover_date = None
     if brand != queries.ALL_BRANDS:
         action_dates = queries.fetch_ondemand_action_dates(brand)
-        default_cutover = date.fromisoformat(action_dates[0]) if action_dates else (date.today() - timedelta(days=1))
+        # Default to the newest action date with at least SETTLING_DAYS of
+        # results after it - the newest date of all is usually today, which
+        # leaves the "after" side empty.
+        settled = [d for d in action_dates if date.fromisoformat(d) <= date.today() - timedelta(days=SETTLING_DAYS)]
+        default_cutover = (date.fromisoformat(settled[0]) if settled
+                           else date.fromisoformat(action_dates[0]) if action_dates
+                           else date.today() - timedelta(days=1))
         cutover_arg = request.args.get("cutover")
         cutover_date = date.fromisoformat(cutover_arg) if cutover_arg else default_cutover
 
@@ -179,9 +185,13 @@ def roas():
     all_rows = queries.fetch_ondemand_roas_impact(brand, since_date, search=search)
     scoreable = [r for r in all_rows if r["verdict"]]
     changes = [float(r["roas_change"]) for r in scoreable if r["roas_change"] is not None]
+    waiting = [r for r in all_rows if r.get("status") == "waiting"]
     kpi = {
         "total": len(all_rows),
         "scoreable": len(scoreable),
+        "waiting": len(waiting),
+        "not_pushed": sum(1 for r in all_rows if r.get("status") == "not_pushed"),
+        "holds": sum(1 for r in all_rows if r.get("status") == "hold"),
         "improved": sum(1 for r in scoreable if r["verdict"] == "IMPROVED"),
         "worsened": sum(1 for r in scoreable if r["verdict"] == "WORSENED"),
         "flat": sum(1 for r in scoreable if r["verdict"] == "FLAT"),
@@ -189,10 +199,10 @@ def roas():
     }
 
     daily = {}
-    for r in scoreable:
+    for r in scoreable + waiting:
         d = str(r["action_date"])
-        bucket = daily.setdefault(d, {"date": d, "improved": 0, "worsened": 0, "flat": 0})
-        bucket[r["verdict"].lower()] += 1
+        bucket = daily.setdefault(d, {"date": d, "improved": 0, "worsened": 0, "flat": 0, "waiting": 0})
+        bucket[r["verdict"].lower() if r["verdict"] else "waiting"] += 1
     daily_series = [daily[d] for d in sorted(daily.keys())]
 
     rows = [r for r in all_rows if not verdict or r["verdict"] == verdict]
@@ -260,6 +270,8 @@ def roas():
         brand_summary=brand_summary,
         channel=channel,
         action_dates=action_dates,
+        verdict_after_days=queries.VERDICT_AFTER_DAYS,
+        verdict_settle_days=queries.VERDICT_SETTLE_DAYS,
         active="roas",
     )
 
