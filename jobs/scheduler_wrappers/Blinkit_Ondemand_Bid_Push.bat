@@ -24,7 +24,7 @@ if errorlevel 1 (
 ) else (
     "%GIT%" -C "%REPO%" reset --quiet --hard origin/main >> "%LOG%" 2>&1
 )
-for /f %%C in ('"%GIT%" -C "%REPO%" rev-parse --short HEAD') do echo Code version: %%C >> "%LOG%"
+"%GIT%" -C "%REPO%" log -1 --format="Code version: %%h %%s" >> "%LOG%" 2>&1
 
 call "%REPO%\jobs\run_job.bat" "Blinkit_Ondemand_Bid_Push.ipynb" "ondemand_push"
 exit /b %ERRORLEVEL%
