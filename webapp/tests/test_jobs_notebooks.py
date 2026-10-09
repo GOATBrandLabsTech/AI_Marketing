@@ -34,6 +34,6 @@ def test_notebook_uses_repo_engine_code(name):
     assert "PYTHON_SCRIPTS_DIR" not in code
 
 
-def test_daily_job_stays_on_the_pilot_scope():
-    # widening the scope is a deliberate decision, never a side effect
-    assert 'SCOPE = [("Voylla", ["296464"])]' in _code(_load(NOTEBOOKS[0]))
+def test_daily_job_scope_is_deliberate():
+    # changing the scope is a deliberate decision, never a side effect
+    assert 'SCOPE = [("Voylla", ["296464"]), ("Chumbak", ["607078"])]' in _code(_load(NOTEBOOKS[0]))
