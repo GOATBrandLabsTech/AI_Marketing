@@ -11,7 +11,7 @@ import json
 import math
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 from sqlalchemy import text
@@ -2911,6 +2911,28 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
 # suggestion looks and behaves identically whichever way it was triggered.
 # ══════════════════════════════════════════════════════════════════════════════
 
+def data_freshness_problem(last_report_day, today):
+    """Why a brand's suggestions must NOT be generated, or None if it is fine.
+    The report has to include yesterday: a decision on data a day or more
+    old (Chumbak's report stopped on 9 Oct on 11 Oct) acts on the wrong days.
+    last_report_day None = no rows at all for the brand."""
+    expected = today - timedelta(days=1)
+    if last_report_day is None:
+        return "no report rows for this brand"
+    if last_report_day < expected:
+        return (f"report data only runs through {last_report_day}, "
+                f"yesterday is {expected} - not generating on stale data")
+    return None
+
+
+def _brand_last_report_day(engine, brand):
+    row = pd.read_sql(
+        text("""SELECT MAX(TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date) AS d
+                FROM voylla."Blinkit_Ads_Report" WHERE "Brand" = :brand"""),
+        engine, params={"brand": brand})["d"].iloc[0]
+    return None if pd.isna(row) else pd.Timestamp(row).date()
+
+
 def generate_daily_suggestions_for_brand(brand, campaign_ids=None, requested_by="daily_scheduled"):
     """
     Loops generate_ondemand_suggestions() over every on-demand-managed
@@ -2940,6 +2962,13 @@ def generate_daily_suggestions_for_brand(brand, campaign_ids=None, requested_by=
         ids = sorted(managed & spending)
     if not ids:
         return {"brand": brand, "campaigns_run": 0, "total_suggestions": 0, "failures": []}
+
+    # Never decide on stale data: skip the whole brand and say why.
+    problem = data_freshness_problem(_brand_last_report_day(engine, brand), date.today())
+    if problem:
+        print(f"[daily] {brand}: SKIPPED - {problem}")
+        return {"brand": brand, "campaigns_run": 0, "total_suggestions": 0,
+                "failures": [{"campaign_id": c, "error": problem} for c in ids]}
 
     total = 0
     failures = []
