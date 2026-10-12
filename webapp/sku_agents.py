@@ -327,26 +327,24 @@ week of stock, or one that sells below cost; never mark_dead a SKU that sold in 
 campaign-level, shared by every product in the campaign - say so if it matters. You only advise: \
 nothing you say is executed without a human.
 
-Answer by calling the recommend tool once. Keep it short: one-sentence summary, at most 4 reasons \
+Keep the answer short: one-sentence summary, at most 4 reasons \
 (each with a number from the reports), at most 3 risks, at most 3 things to check first."""
 
-# The answer comes back as a forced tool call, so it is always a JSON object
-# (free text could be cut off or wrapped in prose and then not be readable).
-BOSS_TOOL = {
-    "name": "recommend",
-    "description": "Give the one recommended action for this SKU and goal.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string", "enum": list(ACTIONS)},
-            "summary": {"type": "string", "description": "One sentence."},
-            "reasons": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
-            "risks": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
-            "check_first": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
-            "confidence": {"type": "number", "description": "0.5 to 0.95"},
-        },
-        "required": ["action", "summary", "reasons", "confidence"],
+# Structured outputs: the API only returns JSON that matches this schema, so the
+# answer is always readable. (Claude Sonnet 5.5 refuses forced tool calls, which
+# is why this is not a tool.) Every field required, no extra fields.
+BOSS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": list(ACTIONS)},
+        "summary": {"type": "string"},
+        "reasons": {"type": "array", "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "check_first": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number"},
     },
+    "required": ["action", "summary", "reasons", "risks", "check_first", "confidence"],
+    "additionalProperties": False,
 }
 
 
@@ -371,18 +369,18 @@ def ask_boss(row, reports, goal, client, model=BOSS_MODEL):
         raise ValueError(f"unknown goal {goal!r}; use one of {', '.join(GOALS)}")
     system = BOSS_SYSTEM.format(actions="; ".join(f"{k} = {v}" for k, v in ACTIONS.items()))
     resp = client.messages.create(model=model, max_tokens=BOSS_MAX_TOKENS, system=system,
-                                  tools=[BOSS_TOOL], tool_choice={"type": "tool", "name": "recommend"},
+                                  output_config={"format": {"type": "json_schema", "schema": BOSS_SCHEMA}},
                                   messages=[{"role": "user", "content": boss_prompt(goal, row, reports)}])
     stop = getattr(resp, "stop_reason", None)
-    call = next((b for b in resp.content if getattr(b, "type", "") == "tool_use"), None)
     raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     if stop == "max_tokens":
         rec = {"action": "no_action", "summary": "The boss reply was cut off before it finished.",
                "error": f"hit the {BOSS_MAX_TOKENS}-token limit"}
-    elif call is not None and isinstance(call.input, dict):
-        rec = dict(call.input)
+    elif stop == "refusal":
+        rec = {"action": "no_action", "summary": "The model declined to answer.",
+               "error": f"refusal: {getattr(getattr(resp, 'stop_details', None), 'category', None)}"}
     else:
-        try:  # older stand-ins / a model that answered in text anyway
+        try:
             rec = _parse_json_object(raw)
         except Exception as exc:
             rec = {"action": "no_action", "summary": "The boss reply could not be read.",
