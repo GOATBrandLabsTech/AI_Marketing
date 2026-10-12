@@ -201,15 +201,28 @@ WHERE brand = lower(:brand) AND item_id::text = :item_id
 GROUP BY 1 ORDER BY units_30d DESC
 """
 
+# Stock is summed per warehouse FIRST, then the cities each warehouse serves are
+# attached. QC_City_Mappping has one row per (warehouse, city), so joining it
+# before summing counted a warehouse's stock once per city it serves (13 Oct:
+# VMJAI40866 showed 3,667 units across warehouses against 924 real).
 STOCK_SQL = """
-SELECT s.backend_facility_name AS warehouse, MAX(q."City Name") AS city, MAX(q."Cluster Name") AS cluster,
-       SUM(s.backend_inv_qty + s.frontend_inv_qty) AS stock
-FROM "DataWarehouse".blinkit_soh s
-LEFT JOIN voylla."QC_City_Mappping" q
-       ON q."Facility" = s.backend_facility_name AND POSITION('blinkit' IN LOWER(q."Channel")) > 0
-WHERE s.brand = lower(:brand) AND s.item_id::text = :item_id
-  AND s.created_at = (SELECT MAX(created_at) FROM "DataWarehouse".blinkit_soh WHERE brand = lower(:brand))
-GROUP BY 1 ORDER BY stock DESC
+WITH st AS (
+    SELECT backend_facility_name AS warehouse, SUM(backend_inv_qty + frontend_inv_qty) AS stock
+    FROM "DataWarehouse".blinkit_soh
+    WHERE brand = lower(:brand) AND item_id::text = :item_id
+      AND created_at = (SELECT MAX(created_at) FROM "DataWarehouse".blinkit_soh WHERE brand = lower(:brand))
+    GROUP BY 1
+),
+q AS (
+    SELECT "Facility" AS warehouse, STRING_AGG(DISTINCT "City Name", ', ' ORDER BY "City Name") AS city,
+           MAX("Cluster Name") AS cluster
+    FROM voylla."QC_City_Mappping"
+    WHERE POSITION('blinkit' IN LOWER("Channel")) > 0
+    GROUP BY 1
+)
+SELECT st.warehouse, q.city, q.cluster, st.stock
+FROM st LEFT JOIN q ON q.warehouse = st.warehouse
+ORDER BY st.stock DESC
 """
 
 PRICE_HISTORY_SQL = """

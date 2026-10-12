@@ -65,6 +65,14 @@ def _city_key(name):
     return CITY_ALIASES.get(n, n)
 
 
+def _stocked_cities(detail):
+    """Every city served by a warehouse that holds this SKU now. A warehouse's
+    'city' is the comma-joined list of cities it serves (sku_intel.STOCK_SQL)."""
+    return {_city_key(c) for w in (detail.get("stock_by_warehouse") or [])
+            if w.get("city") and (_f(w.get("stock")) or 0) > 0
+            for c in str(w["city"]).split(",") if c.strip()}
+
+
 def _report(department, status, headline, findings, facts):
     return {"department": department, "status": status, "headline": headline,
             "findings": findings, "facts": facts}
@@ -107,7 +115,7 @@ def inventory_agent(row, detail):
     stock, u30 = _f(row.get("stock")) or 0, _f(row.get("units_30d")) or 0
     cover = si.days_of_cover(stock, u30)
     wh = detail.get("stock_by_warehouse") or []
-    stocked_cities = {_city_key(w["city"]) for w in wh if w.get("city") and (_f(w.get("stock")) or 0) > 0}
+    stocked_cities = _stocked_cities(detail)
     unmapped = sorted({w["warehouse"] for w in wh if not w.get("city")})
     # cities that sold it in the last 30 days but have no warehouse holding it now
     dry = [c["city"] for c in (detail.get("city_sales") or [])
@@ -187,8 +195,7 @@ def marketing_agent(row, detail):
     camps = detail.get("campaigns") or []
     stock, u30 = _f(row.get("stock")) or 0, _f(row.get("units_30d")) or 0
     master = detail.get("city_master") or {}
-    stocked = {_city_key(w["city"]) for w in (detail.get("stock_by_warehouse") or [])
-               if w.get("city") and (_f(w.get("stock")) or 0) > 0}
+    stocked = _stocked_cities(detail)
     out, findings, low_roas, no_stock_cities = [], [], [], set()
     for c in camps:
         spend, sales = _f(c.get("spend")) or 0, _f(c.get("sales")) or 0
