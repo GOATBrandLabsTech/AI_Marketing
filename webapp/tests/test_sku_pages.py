@@ -41,6 +41,12 @@ def test_oos_view_lists_campaigns_with_remove_controls(client):
     html = client.get("/sku-health?flag=advertised_oos").get_data(as_text=True)
     assert "Earrings" in html and 'data-cid="900"' in html and "Remove selected from campaigns" in html
     assert "Removal pending" in html and "cancelRemoval(5)" in html
+    assert "Item ID 222" in html and "Product ID 111" in html
+
+
+def test_search_by_blinkit_item_id(client):
+    assert "Test jhumka" in client.get("/sku-health?q=222").get_data(as_text=True)
+    assert "Test jhumka" not in client.get("/sku-health?q=999").get_data(as_text=True)
 
 
 def test_sku_detail_page_shows_five_reports(client):

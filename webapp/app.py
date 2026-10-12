@@ -567,7 +567,8 @@ def sku_health():
     s = search.lower()
     shown = [r for r in rows
              if (not flag or flag in r["flags"])
-             and (not s or s in (r.get("sku") or "").lower() or s in (r.get("name") or "").lower())]
+             and (not s or s in (r.get("sku") or "").lower() or s in (r.get("name") or "").lower()
+                       or s == str(r.get("item_id") or "").lower() or s == str(r.get("pid") or "").lower())]
     shown.sort(key=lambda r: (-len(r["flags"]), -(r.get("units_30d") or 0)))
     engine = get_engine()
     ids = sorted({c for r in shown for c in str(r.get("campaign_ids") or "").split(",") if c})
