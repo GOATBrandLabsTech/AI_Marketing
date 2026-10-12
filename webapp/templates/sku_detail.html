@@ -80,6 +80,7 @@ async function askBoss() {
     const r = res.recommendation;
     out.innerHTML = `<div class="text-lg font-bold">${esc(ACTIONS[r.action] || r.action)}</div>
       <div class="text-sm mt-1">${esc(r.summary || '')}</div>
+      ${r.error ? `<div class="text-sm mt-2" style="color:var(--critical)">Problem: ${esc(r.error)}</div>` : ''}
       ${r.overruled ? `<div class="text-sm mt-2" style="color:var(--critical)">Overruled by a safety rule: ${esc(r.overruled)}</div>` : ''}
       ${list('Why', r.reasons)}${list('Risks', r.risks)}${list('Check first', r.check_first)}
       <div class="text-xs mt-2" style="color:var(--ink-muted)">Confidence ${esc(r.confidence)} · ${esc(r.model)} · ${esc(r.input_tokens)} in / ${esc(r.output_tokens)} out tokens</div>`;

@@ -21,7 +21,7 @@ from statistics import median
 import sku_intel as si
 
 BOSS_MODEL = "claude-sonnet-5-5"
-BOSS_MAX_TOKENS = 900
+BOSS_MAX_TOKENS = 2000   # a cut-off reply cannot be read; the answer itself is ~300-600 tokens
 
 GOALS = {
     "increase_sales": "Increase sales of this SKU",
@@ -327,9 +327,27 @@ week of stock, or one that sells below cost; never mark_dead a SKU that sold in 
 campaign-level, shared by every product in the campaign - say so if it matters. You only advise: \
 nothing you say is executed without a human.
 
-Reply with ONLY a JSON object: {{"action": "<key>", "summary": "<one sentence>", \
-"reasons": ["<short, with numbers>", ...], "risks": ["..."], "check_first": ["..."], \
-"confidence": <0.5-0.95>}}"""
+Answer by calling the recommend tool once. Keep it short: one-sentence summary, at most 4 reasons \
+(each with a number from the reports), at most 3 risks, at most 3 things to check first."""
+
+# The answer comes back as a forced tool call, so it is always a JSON object
+# (free text could be cut off or wrapped in prose and then not be readable).
+BOSS_TOOL = {
+    "name": "recommend",
+    "description": "Give the one recommended action for this SKU and goal.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": list(ACTIONS)},
+            "summary": {"type": "string", "description": "One sentence."},
+            "reasons": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+            "risks": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+            "check_first": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+            "confidence": {"type": "number", "description": "0.5 to 0.95"},
+        },
+        "required": ["action", "summary", "reasons", "confidence"],
+    },
+}
 
 
 def boss_prompt(goal, row, reports):
@@ -353,13 +371,24 @@ def ask_boss(row, reports, goal, client, model=BOSS_MODEL):
         raise ValueError(f"unknown goal {goal!r}; use one of {', '.join(GOALS)}")
     system = BOSS_SYSTEM.format(actions="; ".join(f"{k} = {v}" for k, v in ACTIONS.items()))
     resp = client.messages.create(model=model, max_tokens=BOSS_MAX_TOKENS, system=system,
+                                  tools=[BOSS_TOOL], tool_choice={"type": "tool", "name": "recommend"},
                                   messages=[{"role": "user", "content": boss_prompt(goal, row, reports)}])
+    stop = getattr(resp, "stop_reason", None)
+    call = next((b for b in resp.content if getattr(b, "type", "") == "tool_use"), None)
     raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    try:
-        rec = _parse_json_object(raw)
-    except Exception as exc:
-        rec = {"action": "no_action", "summary": "The boss reply could not be read.", "error": str(exc)}
+    if stop == "max_tokens":
+        rec = {"action": "no_action", "summary": "The boss reply was cut off before it finished.",
+               "error": f"hit the {BOSS_MAX_TOKENS}-token limit"}
+    elif call is not None and isinstance(call.input, dict):
+        rec = dict(call.input)
+    else:
+        try:  # older stand-ins / a model that answered in text anyway
+            rec = _parse_json_object(raw)
+        except Exception as exc:
+            rec = {"action": "no_action", "summary": "The boss reply could not be read.",
+                   "error": f"{exc}; reply started: {raw[:200]!r}"}
     rec = enforce(rec, row, goal)
+    rec["stop_reason"] = stop
     usage = getattr(resp, "usage", None)
     rec["model"] = model
     rec["input_tokens"] = getattr(usage, "input_tokens", None)
