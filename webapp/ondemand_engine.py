@@ -2404,17 +2404,39 @@ def _fetch_aggregated_campaign_data(engine, brand, campaign_id):
     }
 
 
-def _fetch_keyword_pool(engine):
-    df = pd.read_sql("""
-        SELECT
-            REPLACE(ks.keyword, ' ', '_') AS suggested_value,
-            MAX(ks.searches) AS total_searches,
-            MAX(ks.weighted_score) AS weighted_score,
-            BOOL_OR(ks.is_brand_keyword) AS is_brand
-        FROM voylla."Blinkit_keyword_suggestions" ks
-        GROUP BY ks.keyword
-        ORDER BY weighted_score DESC;
-    """, engine)
+# The pool is only used to pick replacement keywords when the AI pauses one,
+# but it rides along on every call. All three brands' 4,187 keywords made up
+# ~95% of each call's tokens. Now: keywords suggested for THIS campaign's own
+# products (Blinkit_keyword_suggestions.product_id), most-searched first.
+KEYWORD_POOL_LIMIT = 300
+
+_POOL_SQL = """
+    SELECT
+        REPLACE(ks.keyword, ' ', '_') AS suggested_value,
+        MAX(ks.searches) AS total_searches,
+        MAX(ks.weighted_score) AS weighted_score,
+        BOOL_OR(ks.is_brand_keyword) AS is_brand
+    FROM voylla."Blinkit_keyword_suggestions" ks
+    WHERE ks.brand_name = :brand {product_filter}
+    GROUP BY ks.keyword
+    ORDER BY MAX(ks.searches) DESC NULLS LAST
+    LIMIT :limit
+"""
+
+
+def _fetch_keyword_pool(engine, brand, campaign_id=None, limit=KEYWORD_POOL_LIMIT):
+    """Replacement-keyword candidates for one campaign: keywords suggested for
+    the products it advertises; if it has none, the brand's most-searched."""
+    if campaign_id is not None:
+        df = pd.read_sql(text(_POOL_SQL.format(product_filter="""
+            AND ks.product_id::text IN (
+                SELECT product_id::text FROM voylla."Blinkit_CampaignWise_ProductID"
+                WHERE campaign_id::text = :cid AND product_id IS NOT NULL)""")),
+            engine, params={"brand": brand, "cid": str(campaign_id), "limit": limit})
+        if not df.empty:
+            return df.to_dict(orient="records")
+    df = pd.read_sql(text(_POOL_SQL.format(product_filter="")), engine,
+                     params={"brand": brand, "limit": limit})
     return df.to_dict(orient="records")
 
 
@@ -2694,7 +2716,7 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
              or (DECISION_MODEL_AUTO if _is_auto else None)
              or DECISION_MODEL_OVERRIDE or cfg.get("model") or "claude-haiku-4-5-20251001")
 
-    keyword_pool_records = _fetch_keyword_pool(engine)
+    keyword_pool_records = _fetch_keyword_pool(engine, brand, campaign_id)
     KEYWORD_POOL_BLOCK = {
         "type": "text",
         "text": ("KEYWORD POOL — the ONLY source for alternative_keywords (used when "
