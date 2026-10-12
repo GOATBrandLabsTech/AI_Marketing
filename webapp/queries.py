@@ -596,21 +596,76 @@ def fetch_channel_daily(brand, days=180, campaign_ids=None):
 
 
 def fetch_ai_managed_campaign_ids(brand):
-    """Campaigns where an on-demand AI decision actually reached Blinkit
-    (accepted and pushed). The channel ROAS panel scopes to these by default
-    so its "After (AI)" line describes campaigns the AI really changed - the
-    whole channel is ~35 campaigns and the AI may run only one of them."""
+    """Campaigns the AI runs: set to Auto in the panel, or with an AI decision
+    that actually reached Blinkit. The channel ROAS panel scopes to these by
+    default so its "After (AI)" line describes campaigns the AI really runs -
+    the whole channel is ~35 campaigns and the AI may run only a few."""
     with get_cursor() as cur:
         cur.execute(
             """
-            SELECT DISTINCT campaign_id
-            FROM voylla.blinkit_ondemand_actions
-            WHERE "Brand" = %(brand)s AND push_status = 'done'
-              AND campaign_id ~ '^[0-9]+$'
+            SELECT campaign_id::text AS campaign_id FROM voylla.campaign_autonomy_mode
+            WHERE brand = %(brand)s AND mode = 'auto' AND campaign_id::text ~ '^[0-9]+$'
+            UNION
+            SELECT DISTINCT campaign_id FROM voylla.blinkit_ondemand_actions
+            WHERE "Brand" = %(brand)s AND push_status = 'done' AND campaign_id ~ '^[0-9]+$'
             """,
             {"brand": brand},
         )
         return sorted(int(r["campaign_id"]) for r in cur.fetchall())
+
+
+def fetch_campaign_scoreboard(brand, campaign_ids, cutover_date, window_days=7):
+    """One row per AI campaign: spend and ROAS in the window_days before the
+    cutover vs from the cutover on, and the bid changes the AI pushed in that
+    after-window (raised / cut / paused). Biggest after-spend first."""
+    if not campaign_ids:
+        return []
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            WITH perf AS (
+                SELECT "Campaign ID"::text AS cid, MAX("Campaign Name") AS name,
+                       SUM("Estimated Budget Consumed") FILTER (WHERE d >= %(b0)s AND d < %(cut)s) AS spend_before,
+                       SUM("Direct Sales" + "Indirect Sales") FILTER (WHERE d >= %(b0)s AND d < %(cut)s) AS sales_before,
+                       SUM("Estimated Budget Consumed") FILTER (WHERE d >= %(cut)s AND d < %(a1)s) AS spend_after,
+                       SUM("Direct Sales" + "Indirect Sales") FILTER (WHERE d >= %(cut)s AND d < %(a1)s) AS sales_after,
+                       COUNT(DISTINCT d) FILTER (WHERE d >= %(cut)s AND d < %(a1)s) AS days_after
+                FROM (SELECT *, TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date AS d
+                      FROM voylla."Blinkit_Ads_Report" WHERE "Brand" = %(brand)s) a
+                WHERE "Campaign ID"::text = ANY(%(ids)s) AND d >= %(b0)s AND d < %(a1)s
+                GROUP BY 1
+            ),
+            bids AS (
+                SELECT campaign_id AS cid,
+                       COUNT(*) FILTER (WHERE action = 'INCREASE_CPM') AS raised,
+                       COUNT(*) FILTER (WHERE action = 'DECREASE_CPM') AS cut,
+                       COUNT(*) FILTER (WHERE action = 'PAUSE') AS paused,
+                       MAX(action_date) AS last_push
+                FROM voylla.blinkit_ondemand_actions
+                WHERE "Brand" = %(brand)s AND push_status = 'done' AND campaign_id = ANY(%(ids)s)
+                  AND action_date >= %(cut)s AND action_date < %(a1)s
+                GROUP BY 1
+            ),
+            mode AS (SELECT campaign_id::text AS cid, mode FROM voylla.campaign_autonomy_mode WHERE brand = %(brand)s)
+            SELECT p.*, COALESCE(b.raised, 0) AS raised, COALESCE(b.cut, 0) AS cut,
+                   COALESCE(b.paused, 0) AS paused, b.last_push, m.mode
+            FROM perf p LEFT JOIN bids b USING (cid) LEFT JOIN mode m USING (cid)
+            ORDER BY COALESCE(p.spend_after, 0) DESC
+            """,
+            {"brand": brand, "ids": [str(i) for i in campaign_ids], "cut": cutover_date,
+             "b0": cutover_date - timedelta(days=window_days), "a1": cutover_date + timedelta(days=window_days)},
+        )
+        rows = cur.fetchall()
+    out = []
+    for r in rows:
+        sb, sa = float(r["spend_before"] or 0), float(r["spend_after"] or 0)
+        rb = float(r["sales_before"] or 0) / sb if sb else None
+        ra = float(r["sales_after"] or 0) / sa if sa else None
+        out.append(dict(r, spend_before=sb, spend_after=sa,
+                        roas_before=round(rb, 2) if rb is not None else None,
+                        roas_after=round(ra, 2) if ra is not None else None,
+                        change_pct=round((ra / rb - 1) * 100) if rb and ra is not None else None))
+    return out
 
 
 def bucket_channel_series(daily, granularity="day"):

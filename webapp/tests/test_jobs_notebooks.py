@@ -34,6 +34,8 @@ def test_notebook_uses_repo_engine_code(name):
     assert "PYTHON_SCRIPTS_DIR" not in code
 
 
-def test_daily_job_scope_is_deliberate():
-    # changing the scope is a deliberate decision, never a side effect
-    assert 'SCOPE = [("Voylla", ["296464"]), ("Chumbak", ["607078"])]' in _code(_load(NOTEBOOKS[0]))
+def test_daily_job_scope_is_the_auto_mode_setting():
+    # the panel's Auto switch is the one place that decides what runs daily
+    code = _code(_load(NOTEBOOKS[0]))
+    assert "oe.run_auto_campaigns()" in code
+    assert "SCOPE = [" not in code

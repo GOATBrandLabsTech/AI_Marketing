@@ -105,7 +105,12 @@ DECISION_MODEL_OVERRIDE = None
 # comparison (never saved as an action). Both runs' decisions and token costs
 # go to voylla.blinkit_model_runs / voylla.blinkit_model_decisions.
 DECISION_MODEL_BY_CAMPAIGN = {"296464": "claude-sonnet-5-5"}
-SHADOW_MODEL_BY_CAMPAIGN = {"296464": "claude-haiku-4-5-20251001"}
+# Every campaign switched to Auto in the panel decides on the live model; the
+# cheaper shared model stays for manual (semi-auto) suggestions.
+DECISION_MODEL_AUTO = "claude-sonnet-5-5"
+# Haiku ran alongside Sonnet on 296464 from 3-12 Oct: 39/50 decisions agreed and every
+# disagreement was Sonnet cutting a bid that earned nothing. Comparison ended to save spend.
+SHADOW_MODEL_BY_CAMPAIGN = {}
 
 # Bid step size: the AI chooses it as a percent of current CPM; Python holds
 # these hard limits. Raises are capped tighter than cuts because a raise is
@@ -2683,7 +2688,10 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
 
     cfg = get_anthropic_config()
     client = anthropic_sdk.Anthropic(api_key=cfg["api_key"])
+    import queries as _q_mode
+    _is_auto = _q_mode.fetch_autonomy_setting(campaign_id, brand).get("mode") == "auto"
     model = (model_override or DECISION_MODEL_BY_CAMPAIGN.get(campaign_id)
+             or (DECISION_MODEL_AUTO if _is_auto else None)
              or DECISION_MODEL_OVERRIDE or cfg.get("model") or "claude-haiku-4-5-20251001")
 
     keyword_pool_records = _fetch_keyword_pool(engine)
@@ -2910,6 +2918,41 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
 # button and the daily run share this exact same per-campaign logic, so a
 # suggestion looks and behaves identically whichever way it was triggered.
 # ══════════════════════════════════════════════════════════════════════════════
+
+def fetch_auto_campaigns(engine):
+    """(brand, cid) for every campaign set to Auto in the panel that is
+    on-demand managed, not STOPPED on Blinkit (a push could revive it) and
+    spent something in the last 7 days. Switching a campaign to Auto is the
+    decision that puts it in the daily run - there is no second list to edit."""
+    return pd.read_sql(text("""
+        WITH m AS (SELECT campaign_id::text AS cid, brand FROM voylla.campaign_autonomy_mode
+                   WHERE mode = 'auto' AND ondemand_managed),
+             rt AS (SELECT DISTINCT ON (campaign_id) campaign_id::text AS cid, last_status
+                    FROM voylla."Blinkit_Campaign_Runtime" ORDER BY campaign_id, log_date DESC),
+             sp AS (SELECT "Campaign ID"::text AS cid, SUM("Estimated Budget Consumed") AS spend
+                    FROM voylla."Blinkit_Ads_Report"
+                    WHERE TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date >= CURRENT_DATE - 7
+                    GROUP BY 1)
+        SELECT m.brand, m.cid FROM m
+        LEFT JOIN rt USING (cid)
+        JOIN sp USING (cid)
+        WHERE COALESCE(rt.last_status, '') <> 'STOPPED' AND sp.spend > 0
+        ORDER BY 1, 2"""), engine)
+
+
+def run_auto_campaigns(requested_by="daily_scheduled"):
+    """The daily run: every Auto campaign, grouped by brand. Each brand still
+    passes the stale-data guard on its own."""
+    from db import get_engine
+    engine = get_engine()
+    df = fetch_auto_campaigns(engine)
+    results = []
+    for brand, g in df.groupby("brand"):
+        ids = list(g["cid"])
+        print(f"[auto] {brand}: {len(ids)} campaign(s): {', '.join(ids)}")
+        results.append(generate_daily_suggestions_for_brand(brand, campaign_ids=ids, requested_by=requested_by))
+    return results
+
 
 def data_freshness_problem(last_report_day, today):
     """Why a brand's suggestions must NOT be generated, or None if it is fine.

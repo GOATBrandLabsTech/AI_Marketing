@@ -103,6 +103,50 @@
     </div>
   </div>
 
+  {% if channel.scoreboard %}
+  <div class="rounded-xl mt-4 overflow-x-auto" style="background:rgba(255,255,255,.05)">
+    <div class="px-4 pt-3 pb-1 flex flex-wrap items-baseline justify-between gap-2">
+      <div class="text-sm font-semibold text-white">Campaign by campaign</div>
+      <div class="text-[11px]" style="color:#7d93b5">{{ channel.window_days }} days before {{ channel.cutover_date }} vs from it on &middot; bids = changes the AI pushed in that time (&uarr; raised, &darr; cut, &times; paused)</div>
+    </div>
+    <table class="w-full text-xs tabular" style="color:#c7d5ea">
+      <thead>
+        <tr style="color:#7d93b5">
+          <th class="text-left font-semibold px-4 py-2">Campaign</th>
+          <th class="text-left font-semibold px-2 py-2">Bids</th>
+          <th class="text-right font-semibold px-2 py-2">Spend before</th>
+          <th class="text-right font-semibold px-2 py-2">ROAS before</th>
+          <th class="text-right font-semibold px-2 py-2">Spend after</th>
+          <th class="text-right font-semibold px-2 py-2">ROAS after</th>
+          <th class="text-right font-semibold px-4 py-2">Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in channel.scoreboard %}
+        <tr style="border-top:1px solid rgba(255,255,255,.07)">
+          <td class="px-4 py-2">
+            <div class="text-white font-medium">{{ c.name }}</div>
+            <div style="color:#7d93b5">{{ c.cid }}{% if c.mode == 'auto' %} &middot; <span style="color:#8fd3a8">Auto</span>{% endif %}</div>
+          </td>
+          <td class="px-2 py-2 whitespace-nowrap">
+            {% if c.raised %}{{ c.raised }}&uarr; {% endif %}{% if c.cut %}{{ c.cut }}&darr; {% endif %}{% if c.paused %}{{ c.paused }}&times;{% endif %}
+            {% if not (c.raised or c.cut or c.paused) %}<span style="color:#7d93b5">none</span>{% endif %}
+          </td>
+          <td class="px-2 py-2 text-right">&#8377;{{ '{:,.0f}'.format(c.spend_before) }}</td>
+          <td class="px-2 py-2 text-right">{{ c.roas_before if c.roas_before is not none else '-' }}</td>
+          <td class="px-2 py-2 text-right">&#8377;{{ '{:,.0f}'.format(c.spend_after) }}</td>
+          <td class="px-2 py-2 text-right">{{ c.roas_after if c.roas_after is not none else '-' }}</td>
+          <td class="px-4 py-2 text-right font-semibold" style="color: {{ '#3ddc6a' if c.change_pct and c.change_pct > 0 else '#ff8a80' if c.change_pct and c.change_pct < 0 else '#9fb3d1' }}">
+            {{ ('%+d%%'|format(c.change_pct)) if c.change_pct is not none else '-' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="px-4 py-2 text-[11px]" style="color:#7d93b5">The newest days are still settling (Blinkit keeps adding sales to them), so a fresh "after" reads low.</div>
+  </div>
+  {% endif %}
+
   {% if channel.before_after.after_is_partial %}
   <div class="rounded-lg mt-4 px-3 py-2.5 text-xs flex items-start gap-2" style="background:rgba(250,178,25,.12); color:#fddc9a;">
     <svg class="w-4 h-4 flex-none mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>

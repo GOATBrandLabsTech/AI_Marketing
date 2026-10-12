@@ -216,8 +216,7 @@ def roas():
         # whenever there are any); "all" = the whole channel. Comparing the
         # whole channel before/after an AI date credits or blames the AI for
         # campaigns it never touched.
-        ai_ids = (queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak"
-                  else queries.fetch_ai_managed_campaign_ids(brand))
+        ai_ids = queries.fetch_ai_managed_campaign_ids(brand)
         scope = request.args.get("scope") or ("ai" if ai_ids else "all")
         if scope not in ("ai", "all") or (scope == "ai" and not ai_ids):
             scope = "all"
@@ -256,6 +255,8 @@ def roas():
             "settling_from": str(date.today() - timedelta(days=SETTLING_DAYS)),
             "settling_days": SETTLING_DAYS,
             "decisions_on_cutover": queries.count_ondemand_decisions_on_date(brand, cutover_date),
+            "scoreboard": (queries.fetch_campaign_scoreboard(brand, ai_ids, cutover_date, window_days)
+                           if scope == "ai" else []),
         }
 
     return render_template(
