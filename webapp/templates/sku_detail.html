@@ -4,7 +4,7 @@
 <div class="mb-6">
   <a href="{{ url_for('sku_health') }}" data-soft class="text-sm underline" style="color:var(--ink-2)">&larr; SKU Health</a>
   <h1 class="page-title text-2xl font-bold text-ink mt-1">{{ row.sku }}</h1>
-  <p class="text-sm mt-0.5" style="color:var(--ink-2)">{{ row.name or '' }} · {{ row.sub_category or row.category or '' }} · Blinkit product {{ row.pid }}</p>
+  <p class="text-sm mt-0.5" style="color:var(--ink-2)">{{ row.name or '' }} · {{ row.sub_category or row.category or '' }} · Item ID {{ row.item_id or "-" }} · Product ID {{ row.pid or "-" }}</p>
 </div>
 
 <div class="card p-5 mb-6">

@@ -6,12 +6,12 @@
     <h1 class="page-title text-2xl font-bold text-ink">SKU Health</h1>
     <p class="text-sm mt-0.5 max-w-3xl" style="color:var(--ink-2)">
       Every Voylla SKU on Blinkit with its sales, stock, price, offer and campaigns in one row, and what is wrong with it right now.
-      Read-only: nothing here changes a bid, a price or a campaign. {{ total }} SKUs.
+      Nothing here changes a bid or a price; Remove only queues taking a SKU out of a campaign, which the 2 pm push job sends to Blinkit. {{ total }} SKUs.
     </p>
   </div>
   <form method="get" data-soft class="flex gap-2">
     {% if flag %}<input type="hidden" name="flag" value="{{ flag }}">{% endif %}
-    <input type="text" name="q" value="{{ search }}" placeholder="Search SKU or name" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+    <input type="text" name="q" value="{{ search }}" placeholder="SKU, name, item id or product id" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
     <button class="text-white text-sm font-semibold rounded-lg px-4 py-2" style="background:var(--brand)">Search</button>
   </form>
 </div>
@@ -64,6 +64,7 @@
           <td class="px-3 py-2">
             <a class="font-medium whitespace-nowrap underline" href="{{ url_for('sku_detail', sku=r.sku) }}">{{ r.sku }}</a>
             <div class="text-xs truncate max-w-[260px]" style="color:var(--ink-muted)" title="{{ r.name or '' }}">{{ r.name or '' }}</div>
+            <div class="text-xs tabular whitespace-nowrap" style="color:var(--ink-2)">Item ID {{ r.item_id or '-' }} · Product ID {{ r.pid or '-' }}</div>
           </td>
           <td class="px-3 py-2 text-xs" style="color:var(--ink-2)">{{ r.sub_category or r.category or '' }}</td>
           <td class="px-3 py-2 text-right tabular">{{ r.units_7d }}</td>
