@@ -54,6 +54,20 @@ def test_inventory_agent_finds_cities_selling_without_stock():
     assert sa.inventory_agent(row(), d)["facts"]["cities_selling_without_stock"] == []
 
 
+def test_warehouse_serving_several_cities_covers_all_of_them():
+    # a warehouse row lists every city it serves; stock in it covers each one
+    d = detail(stock_by_warehouse=[{"warehouse": "KUN-1", "city": "Delhi, Sonipat, Yamunanagar", "stock": 40}],
+               city_sales=[{"city": "Sonipat", "units_30d": 4}, {"city": "Pune", "units_30d": 3}])
+    assert sa.inventory_agent(row(), d)["facts"]["cities_selling_without_stock"] == ["Pune"]
+
+
+def test_stock_query_sums_before_joining_the_city_map():
+    # 13 Oct: joining QC_City_Mappping (one row per city) before SUM counted stock once per city
+    sql = si.STOCK_SQL
+    assert sql.index("SUM(backend_inv_qty") < sql.index('QC_City_Mappping')
+    assert "STRING_AGG(DISTINCT \"City Name\"" in sql
+
+
 def test_inventory_agent_out_of_stock_and_low_cover():
     assert sa.inventory_agent(row(stock=0), detail())["status"] == "problem"
     assert sa.inventory_agent(row(stock=5), detail())["status"] == "problem"

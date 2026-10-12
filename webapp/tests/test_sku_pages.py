@@ -49,6 +49,13 @@ def test_search_by_blinkit_item_id(client):
     assert "Test jhumka" not in client.get("/sku-health?q=999").get_data(as_text=True)
 
 
+def test_warehouse_total_flags_a_mismatch_with_the_summary(client, monkeypatch):
+    d = dict(DETAIL, stock_by_warehouse=[{"warehouse": "A", "city": "Delhi", "stock": 3}])
+    monkeypatch.setattr(sku_intel, "sku_detail", lambda engine, row, brand=None: d)
+    html = client.get("/sku-health/sku/VJ1").get_data(as_text=True)
+    assert "summary says 0" in html
+
+
 def test_sku_detail_page_shows_five_reports(client):
     html = client.get("/sku-health/sku/VJ1").get_data(as_text=True)
     for dept in ("Sales", "Inventory", "Price &amp; Offer", "Marketing", "Product"):
