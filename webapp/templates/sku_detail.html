@@ -63,6 +63,12 @@
         <tr><td class="py-1">{{ c.city }}</td><td class="text-right tabular">{{ (c.units_7d or 0)|int }}</td><td class="text-right tabular">{{ (c.units_30d or 0)|int }}</td></tr>
         {% else %}<tr><td colspan="3" class="py-2" style="color:var(--ink-muted)">No sales in 30 days.</td></tr>{% endfor %}
       </tbody>
+      {% set t = namespace(d7=0, d30=0) %}
+      {% for c in detail.city_sales %}{% set t.d7 = t.d7 + (c.units_7d or 0)|int %}{% set t.d30 = t.d30 + (c.units_30d or 0)|int %}{% endfor %}
+      {% set bad7 = t.d7 != (row.units_7d or 0)|int %}{% set bad30 = t.d30 != (row.units_30d or 0)|int %}
+      <tfoot><tr class="font-semibold"><td class="py-1">Total ({{ detail.city_sales|length }} cities)</td>
+        <td class="text-right tabular" style="{{ 'color:var(--critical)' if bad7 else '' }}">{{ t.d7 }}{% if bad7 %}<div class="text-xs font-normal">summary says {{ (row.units_7d or 0)|int }}</div>{% endif %}</td>
+        <td class="text-right tabular" style="{{ 'color:var(--critical)' if bad30 else '' }}">{{ t.d30 }}{% if bad30 %}<div class="text-xs font-normal">summary says {{ (row.units_30d or 0)|int }}</div>{% endif %}</td></tr></tfoot>
     </table>
   </div>
 </div>
