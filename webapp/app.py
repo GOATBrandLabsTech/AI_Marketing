@@ -553,6 +553,26 @@ def api_ondemand_override(unique_key):
     return jsonify({"ok": True})
 
 
+@app.route("/sku-health")
+@login_required
+def sku_health():
+    """Phase 1 of the SKU agents: one row per Voylla Blinkit SKU with sales,
+    stock, price, offer, profit and campaign data, and what is wrong with it."""
+    import sku_intel
+    from db import get_engine
+    flag = request.args.get("flag") or None
+    search = (request.args.get("q") or "").strip()
+    rows = sku_intel.sku_snapshot(get_engine())
+    counts = sku_intel.flag_counts(rows)
+    s = search.lower()
+    shown = [r for r in rows
+             if (not flag or flag in r["flags"])
+             and (not s or s in (r.get("sku") or "").lower() or s in (r.get("name") or "").lower())]
+    shown.sort(key=lambda r: (-len(r["flags"]), -(r.get("units_30d") or 0)))
+    return render_template("sku_health.html", rows=shown, counts=counts, labels=sku_intel.FLAG_LABELS,
+                           flag=flag, search=search, total=len(rows), active="sku_health")
+
+
 @app.route("/campaigns")
 @login_required
 def campaigns():
