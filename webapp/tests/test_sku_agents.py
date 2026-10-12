@@ -100,20 +100,39 @@ def test_never_mark_a_selling_sku_dead_and_unknown_actions_refused():
 
 
 class FakeClient:
-    def __init__(self, reply):
-        self.reply, self.calls = reply, []
+    """reply: text, or a dict = the boss answered through the recommend tool."""
+    def __init__(self, reply, stop_reason=None):
+        self.reply, self.calls, self.stop = reply, [], stop_reason
         self.messages = self
 
     def create(self, **kw):
         self.calls.append(kw)
-        return SimpleNamespace(content=[SimpleNamespace(type="text", text=self.reply)],
+        if isinstance(self.reply, dict):
+            content = [SimpleNamespace(type="tool_use", name="recommend", input=self.reply)]
+        else:
+            content = [SimpleNamespace(type="text", text=self.reply)]
+        return SimpleNamespace(content=content, stop_reason=self.stop or ("tool_use" if isinstance(self.reply, dict) else "end_turn"),
                                usage=SimpleNamespace(input_tokens=1500, output_tokens=200))
+
+
+def test_boss_answers_through_the_forced_tool():
+    client = FakeClient({"action": "cut_bid", "summary": "s", "reasons": ["r"], "confidence": 0.7})
+    rec = sa.ask_boss(row(), [], "protect_profit", client)
+    assert rec["action"] == "cut_bid"
+    assert client.calls[0]["tool_choice"] == {"type": "tool", "name": "recommend"}
+    assert client.calls[0]["max_tokens"] >= 1500
+
+
+def test_boss_cut_off_reply_says_so():
+    # 13 Oct: Sonnet's free-text reply hit the 900-token cap mid-JSON -> "could not be read"
+    rec = sa.ask_boss(row(), [], "protect_profit", FakeClient({"action": "cut_bid"}, stop_reason="max_tokens"))
+    assert rec["action"] == "no_action" and "cut off" in rec["summary"]
 
 
 def test_boss_is_one_small_call_and_its_answer_is_checked():
     r, d = row(stock=0), detail()
     reports = sa.department_reports(r, d, [r])
-    client = FakeClient('Sure: {"action": "raise_bid", "summary": "push it", "reasons": ["x"], "confidence": 0.8}')
+    client = FakeClient({"action": "raise_bid", "summary": "push it", "reasons": ["x"], "confidence": 0.8})
     rec = sa.ask_boss(r, reports, "increase_sales", client)
     assert len(client.calls) == 1 and client.calls[0]["model"] == sa.BOSS_MODEL
     assert rec["action"] == "no_action" and "no stock" in rec["overruled"]
