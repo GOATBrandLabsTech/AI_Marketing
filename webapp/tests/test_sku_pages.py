@@ -56,6 +56,12 @@ def test_warehouse_total_flags_a_mismatch_with_the_summary(client, monkeypatch):
     assert "summary says 0" in html
 
 
+def test_city_sales_total_matches_summary(client):
+    # DETAIL: Delhi 3 (7d) / 30 (30d); ROW: units_7d 3, units_30d 30
+    html = client.get("/sku-health/sku/VJ1").get_data(as_text=True)
+    assert "Total (1 cities)" in html and "summary says" not in html.split("Sales by city")[1]
+
+
 def test_sku_detail_page_shows_five_reports(client):
     html = client.get("/sku-health/sku/VJ1").get_data(as_text=True)
     for dept in ("Sales", "Inventory", "Price &amp; Offer", "Marketing", "Product"):
