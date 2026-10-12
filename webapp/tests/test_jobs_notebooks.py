@@ -45,5 +45,5 @@ def test_push_uses_only_the_newest_campaign_snapshot():
     # 12 Oct: an old PAN_INDIA row with no cities was picked and Blinkit
     # rejected 4 campaigns ("City Ids: String should have at least 1 character")
     code = _code(_load(NOTEBOOKS[1]))
-    assert "created_at = (SELECT MAX(created_at)" in code
+    assert "created_at >= (SELECT MAX(created_at)" in code and "INTERVAL '1 hour'" in code
     assert "never send a city campaign with an empty city list" in code
