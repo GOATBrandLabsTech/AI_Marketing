@@ -3,7 +3,7 @@ services:
     name: blinkit-control
     runtime: python
     plan: free
-    branch: sku-intelligence
+    branch: main
     rootDir: webapp
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --timeout 180
