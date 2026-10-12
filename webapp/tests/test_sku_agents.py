@@ -100,27 +100,43 @@ def test_never_mark_a_selling_sku_dead_and_unknown_actions_refused():
 
 
 class FakeClient:
-    """reply: text, or a dict = the boss answered through the recommend tool."""
+    """reply: text, or a dict = the JSON object structured outputs returns."""
     def __init__(self, reply, stop_reason=None):
         self.reply, self.calls, self.stop = reply, [], stop_reason
         self.messages = self
 
     def create(self, **kw):
         self.calls.append(kw)
-        if isinstance(self.reply, dict):
-            content = [SimpleNamespace(type="tool_use", name="recommend", input=self.reply)]
-        else:
-            content = [SimpleNamespace(type="text", text=self.reply)]
-        return SimpleNamespace(content=content, stop_reason=self.stop or ("tool_use" if isinstance(self.reply, dict) else "end_turn"),
+        text_ = json.dumps(self.reply) if isinstance(self.reply, dict) else self.reply
+        content = [SimpleNamespace(type="text", text=text_)]
+        return SimpleNamespace(content=content, stop_reason=self.stop or "end_turn",
                                usage=SimpleNamespace(input_tokens=1500, output_tokens=200))
 
 
-def test_boss_answers_through_the_forced_tool():
-    client = FakeClient({"action": "cut_bid", "summary": "s", "reasons": ["r"], "confidence": 0.7})
+def test_boss_answer_is_schema_bound_json():
+    client = FakeClient({"action": "cut_bid", "summary": "s", "reasons": ["r"], "risks": [], "check_first": [], "confidence": 0.7})
     rec = sa.ask_boss(row(), [], "protect_profit", client)
     assert rec["action"] == "cut_bid"
-    assert client.calls[0]["tool_choice"] == {"type": "tool", "name": "recommend"}
-    assert client.calls[0]["max_tokens"] >= 1500
+    call = client.calls[0]
+    # 13 Oct: claude-sonnet-5-5 returns 400 on forced tool_choice - never send one
+    assert "tool_choice" not in call and "tools" not in call
+    assert call["output_config"]["format"]["schema"] is sa.BOSS_SCHEMA
+    assert call["max_tokens"] >= 1500
+
+
+def test_boss_schema_is_one_the_api_accepts():
+    # structured outputs need every object closed and reject numeric/length/array-size limits
+    assert sa.BOSS_SCHEMA["additionalProperties"] is False
+    assert set(sa.BOSS_SCHEMA["required"]) == set(sa.BOSS_SCHEMA["properties"])
+    text_ = json.dumps(sa.BOSS_SCHEMA)
+    for bad in ("maxItems", "minItems", "minimum", "maximum", "maxLength", "minLength"):
+        assert bad not in text_
+    assert set(sa.BOSS_SCHEMA["properties"]["action"]["enum"]) == set(sa.ACTIONS)
+
+
+def test_boss_refusal_is_no_action():
+    rec = sa.ask_boss(row(), [], "protect_profit", FakeClient("", stop_reason="refusal"))
+    assert rec["action"] == "no_action" and "declined" in rec["summary"]
 
 
 def test_boss_cut_off_reply_says_so():
