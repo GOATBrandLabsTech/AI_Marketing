@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}{{ row.sku }} - SKU Health{% endblock %}
+{% block content %}
+<div class="mb-6">
+  <a href="{{ url_for('sku_health') }}" data-soft class="text-sm underline" style="color:var(--ink-2)">&larr; SKU Health</a>
+  <h1 class="page-title text-2xl font-bold text-ink mt-1">{{ row.sku }}</h1>
+  <p class="text-sm mt-0.5" style="color:var(--ink-2)">{{ row.name or '' }} · {{ row.sub_category or row.category or '' }} · Blinkit product {{ row.pid }}</p>
+</div>
+
+<div class="card p-5 mb-6">
+  <div class="flex flex-wrap items-end gap-3">
+    <div>
+      <div class="text-[11px] font-semibold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">Ask the boss</div>
+      <select id="goal" class="rounded-lg border text-sm px-3 py-2" style="border-color:var(--ring)">
+        {% for key, label in goals.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <button id="askBtn" onclick="askBoss()" class="text-white text-sm font-semibold rounded-lg px-4 py-2" style="background:var(--brand)">Recommend</button>
+    <span class="text-xs max-w-xl" style="color:var(--ink-muted)">One AI call that reads the five reports below and recommends one action. Advice only: nothing is changed.</span>
+  </div>
+  <div id="bossOut" class="mt-4 hidden"></div>
+</div>
+
+<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-6">
+  {% for r in reports %}
+  {% set colour = {'ok': '#1f6b3a', 'watch': '#8a5a00', 'problem': '#9c2626'}[r.status] %}
+  {% set bg = {'ok': '#e8f4ec', 'watch': '#fef3e2', 'problem': '#fbeaea'}[r.status] %}
+  <div class="card p-5">
+    <div class="flex items-center justify-between mb-2">
+      <div class="font-semibold">{{ r.department }}</div>
+      <span class="badge" style="background:{{ bg }};color:{{ colour }}">{{ r.status }}</span>
+    </div>
+    <div class="text-sm font-medium mb-2">{{ r.headline }}</div>
+    <ul class="text-sm list-disc pl-5 space-y-1" style="color:var(--ink-2)">
+      {% for f in r.findings %}<li>{{ f }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid gap-4 xl:grid-cols-2">
+  <div class="card p-5">
+    <div class="font-semibold mb-2">Stock by warehouse</div>
+    <table class="data w-full text-sm">
+      <thead><tr class="text-left"><th class="py-1">Warehouse</th><th>City</th><th class="text-right">Stock</th></tr></thead>
+      <tbody>
+        {% for w in detail.stock_by_warehouse %}
+        <tr><td class="py-1">{{ w.warehouse }}</td><td>{{ w.city or 'not mapped' }}</td><td class="text-right tabular">{{ w.stock|int }}</td></tr>
+        {% else %}<tr><td colspan="3" class="py-2" style="color:var(--ink-muted)">No stock rows.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card p-5">
+    <div class="font-semibold mb-2">Sales by city (30 days)</div>
+    <table class="data w-full text-sm">
+      <thead><tr class="text-left"><th class="py-1">City</th><th class="text-right">7 days</th><th class="text-right">30 days</th></tr></thead>
+      <tbody>
+        {% for c in detail.city_sales %}
+        <tr><td class="py-1">{{ c.city }}</td><td class="text-right tabular">{{ (c.units_7d or 0)|int }}</td><td class="text-right tabular">{{ (c.units_30d or 0)|int }}</td></tr>
+        {% else %}<tr><td colspan="3" class="py-2" style="color:var(--ink-muted)">No sales in 30 days.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const ACTIONS = {{ actions|tojson }};
+const SKU = {{ row.sku|tojson }};
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function list(title, items) {
+  if (!items || !items.length) return '';
+  return `<div class="mt-2"><div class="text-xs font-semibold uppercase" style="color:var(--ink-muted)">${title}</div><ul class="list-disc pl-5 text-sm">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`;
+}
+async function askBoss() {
+  const btn = document.getElementById('askBtn'), out = document.getElementById('bossOut');
+  btn.disabled = true; btn.textContent = 'Thinking...';
+  try {
+    const res = await postJSON('/api/sku/boss', { sku: SKU, goal: document.getElementById('goal').value });
+    const r = res.recommendation;
+    out.innerHTML = `<div class="text-lg font-bold">${esc(ACTIONS[r.action] || r.action)}</div>
+      <div class="text-sm mt-1">${esc(r.summary || '')}</div>
+      ${r.overruled ? `<div class="text-sm mt-2" style="color:var(--critical)">Overruled by a safety rule: ${esc(r.overruled)}</div>` : ''}
+      ${list('Why', r.reasons)}${list('Risks', r.risks)}${list('Check first', r.check_first)}
+      <div class="text-xs mt-2" style="color:var(--ink-muted)">Confidence ${esc(r.confidence)} · ${esc(r.model)} · ${esc(r.input_tokens)} in / ${esc(r.output_tokens)} out tokens</div>`;
+    out.classList.remove('hidden');
+  } catch (e) { /* postJSON already showed the error */ }
+  btn.disabled = false; btn.textContent = 'Recommend';
+}
+</script>
+{% endblock %}

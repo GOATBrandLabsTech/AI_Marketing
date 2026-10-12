@@ -29,6 +29,16 @@
   {% endfor %}
 </div>
 
+<div class="card p-4 mb-4 flex flex-wrap items-center gap-3 text-sm">
+  <label class="flex items-center gap-2"><input type="checkbox" id="selAll" onchange="selectAllCampaigns(this.checked)"> Select every campaign shown</label>
+  <span id="selCount" style="color:var(--ink-muted)">0 selected</span>
+  <button onclick="removeSelected()" class="text-white text-sm font-semibold rounded-lg px-4 py-2" style="background:var(--critical)">Remove selected from campaigns</button>
+  <span class="text-xs max-w-xl" style="color:var(--ink-muted)">
+    Removing takes the product out of that campaign's product list. It is queued here and sent to Blinkit by the 2 pm push job
+    (no change on Blinkit until then; a pending removal can be cancelled). A campaign is never left with no products.
+  </span>
+</div>
+
 <div class="card overflow-hidden">
   <div class="overflow-x-auto max-h-[70vh]">
     <table class="data w-full text-sm" id="skuTable">
@@ -44,7 +54,7 @@
           <th class="px-3 py-3 text-right" data-sortable>SP live</th>
           <th class="px-3 py-3 text-right" data-sortable>Profit / unit</th>
           <th class="px-3 py-3 text-right" data-sortable>Brand fund 7d</th>
-          <th class="px-3 py-3 text-right" data-sortable>Campaigns</th>
+          <th class="px-3 py-3" data-sortable>Campaigns</th>
           <th class="px-3 py-3">Issues</th>
         </tr>
       </thead>
@@ -52,7 +62,7 @@
         {% for r in rows %}
         <tr class="border-b" style="border-color:var(--grid)">
           <td class="px-3 py-2">
-            <div class="font-medium whitespace-nowrap">{{ r.sku }}</div>
+            <a class="font-medium whitespace-nowrap underline" href="{{ url_for('sku_detail', sku=r.sku) }}">{{ r.sku }}</a>
             <div class="text-xs truncate max-w-[260px]" style="color:var(--ink-muted)" title="{{ r.name or '' }}">{{ r.name or '' }}</div>
           </td>
           <td class="px-3 py-2 text-xs" style="color:var(--ink-2)">{{ r.sub_category or r.category or '' }}</td>
@@ -64,7 +74,24 @@
           <td class="px-3 py-2 text-right tabular">{{ r.sp_live|round|int if r.sp_live else '-' }}<div class="text-[10px]" style="color:var(--ink-muted)">{{ r.listing_status or '' }}</div></td>
           <td class="px-3 py-2 text-right tabular" style="color: {{ 'var(--critical)' if r.profit_per_unit is not none and r.profit_per_unit < 0 else 'inherit' }}">{{ r.profit_per_unit|round|int if r.profit_per_unit is not none else '-' }}</td>
           <td class="px-3 py-2 text-right tabular">{{ '₹{:,.0f}'.format(r.brand_fund_7d) if r.brand_fund_7d else '-' }}</td>
-          <td class="px-3 py-2 text-right tabular" title="{{ r.campaign_ids or '' }}">{{ r.campaigns or '-' }}</td>
+          <td class="px-3 py-2 text-xs" style="min-width:260px" data-sort="{{ r.campaigns or 0 }}">
+            {% for cid in (r.campaign_ids or '').split(',') if cid %}
+            {% set rm = removals.get(cid ~ '|' ~ r.pid) %}
+            <div class="flex items-center gap-2 mb-1">
+              {% if rm and rm.status == 'pending' %}
+                <span class="badge" style="background:#fef3e2;color:#8a5a00">Removal pending</span>
+                <span class="truncate max-w-[150px]" title="{{ cid }}">{{ campaign_names.get(cid) or cid }}</span>
+                <button class="underline" onclick="cancelRemoval({{ rm.id }})">Cancel</button>
+              {% else %}
+                <input type="checkbox" class="campSel" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" onchange="updateSelCount()">
+                <span class="truncate max-w-[170px]" title="{{ cid }}">{{ campaign_names.get(cid) or cid }}</span>
+                {% if rm and rm.status == 'done' %}<span class="badge" style="background:#e8f4ec;color:#1f6b3a">Removed, awaiting refresh</span>
+                {% elif rm and rm.status == 'failed' %}<span class="badge" title="{{ rm.push_note or '' }}" style="background:#fbeaea;color:#9c2626">Removal failed</span>{% endif %}
+                <button class="underline" style="color:var(--critical)" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" onclick="removeOne(this)">Remove</button>
+              {% endif %}
+            </div>
+            {% else %}-{% endfor %}
+          </td>
           <td class="px-3 py-2" style="min-width:230px">
             {% for f in r.flags %}<span class="badge mr-1 mb-1" style="white-space:normal;background:{{ '#fbeaea' if f in ('advertised_oos','below_cost') else '#fef3e2' }};color:{{ '#9c2626' if f in ('advertised_oos','below_cost') else '#8a5a00' }}">{{ labels[f] }}</span>{% endfor %}
           </td>
@@ -82,5 +109,35 @@
 </p>
 {% endblock %}
 {% block scripts %}
-<script>initSortableTable('skuTable');</script>
+<script>initSortableTable('skuTable');
+const removalReason = {{ (labels[flag] if flag else 'SKU Health')|tojson }};
+function updateSelCount() {
+  document.getElementById('selCount').textContent = document.querySelectorAll('.campSel:checked').length + ' selected';
+}
+function selectAllCampaigns(on) {
+  document.querySelectorAll('.campSel').forEach(cb => cb.checked = on);
+  updateSelCount();
+}
+async function queueRemovals(items) {
+  if (!items.length) { toast('Nothing selected', false); return; }
+  const skus = new Set(items.map(i => i.sku)).size;
+  if (!confirm(`Take ${skus} SKU(s) out of ${items.length} campaign slot(s)? The 2 pm push job sends this to Blinkit.`)) return;
+  const res = await postJSON('/api/sku/removals', { items, reason: removalReason });
+  let msg = `${res.queued} removal(s) queued`;
+  if (res.already_pending) msg += `, ${res.already_pending} already pending`;
+  if (res.rejected && res.rejected.length) msg += `, ${res.rejected.length} no longer in that campaign`;
+  toast(msg, true);
+  setTimeout(() => location.reload(), 900);
+}
+function removeOne(b) { queueRemovals([{ campaign_id: b.dataset.cid, pid: b.dataset.pid, sku: b.dataset.sku }]); }
+function removeSelected() {
+  queueRemovals([...document.querySelectorAll('.campSel:checked')].map(cb => ({
+    campaign_id: cb.dataset.cid, pid: cb.dataset.pid, sku: cb.dataset.sku })));
+}
+async function cancelRemoval(id) {
+  await postJSON(`/api/sku/removals/${id}/cancel`, {});
+  toast('Removal cancelled', true);
+  setTimeout(() => location.reload(), 600);
+}
+</script>
 {% endblock %}

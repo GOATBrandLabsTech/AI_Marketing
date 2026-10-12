@@ -47,9 +47,17 @@ department agents report and a boss agent recommends the action (bid, campaign m
 targeting, price/offer, channel shift, or mark dead). Voylla only for now. Read-only until Amit approves actions.
 - Phase 1 (done): `webapp/sku_intel.py` + `/sku-health` page - per-SKU sales, stock, cover, asked vs live
   price, profit/unit (LP - cost), brand fund, campaigns, and flags.
-- Phase 2: Sales / Inventory / Price-Offer / Marketing / Product agents as plain Python + SQL reports
-  (no LLM cost), one boss LLM call per question, surfaced in Agent Chat and a SKU detail page.
+- Phase 2 (built, needs checking on live data): `webapp/sku_agents.py` - Sales / Inventory / Price-Offer /
+  Marketing / Product agents (plain Python over `sku_intel.sku_detail`, no LLM), one boss call
+  (`BOSS_MODEL`, ~2k tokens) per SKU + goal, checked by `blocked_actions` (no extra ad spend with no stock,
+  < 7 days cover, or below cost; never mark a selling SKU dead). Answers logged to
+  `voylla.sku_boss_recommendations`. Page `/sku-health/sku/<sku>`; chat tools `get_sku_report`, `recommend_for_sku`.
+- First approved action: take a SKU out of a campaign from SKU Health (per campaign or bulk). The page only
+  queues it (`voylla.sku_campaign_removals`, `webapp/sku_actions.py`); the push notebook applies it with the
+  campaign's product list minus the product (`REMOVALS_DRY_RUN = True` until Amit checks one run). Never leaves
+  a campaign with no products; a done removal stays out of later bid pushes until a newer campaign load.
+- City master: the push notebook GETs `/adservice/v3/campaigns/config` after login (`webapp/blinkit_config.py`)
+  into `voylla.blinkit_city_master` (city_id, city_name). Token never stored. Only runs on days something is pushed.
 - Phase 3: boss recommendations become approvable actions.
-Open items: Blinkit city-id -> name master (fetch `GET /adservice/v3/campaigns/config` with the push job's
-own login and store it; tokens expire in 1 hour - never store tokens); 16 Blinkit warehouses missing from
-`QC_City_Mappping`; how often the offers file is refreshed.
+Open items: confirm the config reply shape fills the city master (the job prints its top-level keys if not);
+16 Blinkit warehouses missing from `QC_City_Mappping`; how often the offers file is refreshed.

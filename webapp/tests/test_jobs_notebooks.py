@@ -47,3 +47,17 @@ def test_push_uses_only_the_newest_campaign_snapshot():
     code = _code(_load(NOTEBOOKS[1]))
     assert "created_at >= (SELECT MAX(created_at)" in code and "INTERVAL '1 hour'" in code
     assert "never send a city campaign with an empty city list" in code
+
+
+def test_push_fetches_city_master_read_only_after_login():
+    code = _code(_load(NOTEBOOKS[1]))
+    assert "blinkit_config.fetch_and_store_city_master(engine, token, cookies)" in code
+    # comes after the login check, inside its own try so it can never stop a push
+    assert code.index("fetch_and_store_city_master") > code.index("if not token:")
+
+
+def test_push_applies_sku_removals_safely():
+    code = _code(_load(NOTEBOOKS[1]))
+    assert "REMOVALS_DRY_RUN = True" in code
+    assert "sku_actions.products_after_removal(" in code
+    assert "sku_actions.mark_removals(engine, removal_ids" in code
