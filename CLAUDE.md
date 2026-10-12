@@ -41,7 +41,7 @@ Owner: Amit (Analytics). Explain things plainly, explain before asking for appro
 - Item master: `voylla.voylla_in_unicommerce_itemmaster_dedup` (EAN, Product Code, Category, Cost Price).
 - Other channels (Instamart, Zepto, Myntra, Amazon, offline) join on EAN.
 
-## Current project: department agents + boss (branch `sku-intelligence`)
+## Current project: department agents + boss (merged to main; Render test copy runs main)
 Goal: for a SKU or goal ("increase sales of X", "protect profit", "avoid stock-out", "clear stock"),
 department agents report and a boss agent recommends the action (bid, campaign membership, city
 targeting, price/offer, channel shift, or mark dead). Voylla only for now. Read-only until Amit approves actions.
