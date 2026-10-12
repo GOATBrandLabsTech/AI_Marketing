@@ -75,6 +75,10 @@ Their "was_implemented"/verdict logic requires an actual live push (push_status 
 independent Blinkit_Ondemand_Bid_Push.ipynb), which stays in DRY_RUN until a human turns it off - so \
 until then, expect verdicts to be empty/NULL for everything. That's correct, not a bug: nothing has \
 actually gone live yet, so there is nothing to honestly attribute a ROAS change to.
+- SKU questions (Voylla only): get_sku_report gives the five department reports for free; call \
+recommend_for_sku only when the user wants a recommendation for a goal (it is an extra AI call). Pass on \
+the boss's action, reasons and any safety-rule overrule, and link the SKU page it returns. Taking a SKU out \
+of a campaign is done from the SKU Health page (queued, applied by the 2 pm push job), not from chat.
 """
 
 TOOLS = [
@@ -248,6 +252,38 @@ TOOLS = [
                 },
             },
             "required": ["brand", "entity_type", "text"],
+        },
+    },
+    {
+        "name": "get_sku_report",
+        "description": (
+            "Voylla only. One SKU's five department reports (Sales, Inventory, Price & Offer, "
+            "Marketing, Product): sales pace and top cities, stock and days of cover, asked vs live "
+            "price, profit per unit, brand-funded offer, the campaigns it is in with their spend and "
+            "ROAS, and its rank in its category. Plain data, no AI cost. Use for any question about "
+            "a specific SKU or product ('how is VJ1234 doing', 'why is X not selling')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"sku": {"type": "string", "description": "SKU code, or part of the product name"}},
+            "required": ["sku"],
+        },
+    },
+    {
+        "name": "recommend_for_sku",
+        "description": (
+            "Voylla only. Asks the boss agent (one extra AI call) to recommend ONE action for a SKU "
+            "toward a goal, from the five department reports, with reasons; hard safety rules can "
+            "overrule it. Advice only - it changes nothing. Use when the user asks what to do about "
+            "a SKU: 'increase sales of X', 'protect profit on X', 'will X run out', 'clear stock of X'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "sku": {"type": "string"},
+                "goal": {"type": "string", "enum": ["increase_sales", "protect_profit", "avoid_stockout", "clear_stock"]},
+            },
+            "required": ["sku", "goal"],
         },
     },
     {
@@ -544,6 +580,37 @@ def _tool_get_notes(brand, include_stale=False):
     }
 
 
+def _sku_brand_check(brand):
+    return None if (brand or "").lower() == "voylla" else {"error": "SKU agents cover Voylla only for now"}
+
+
+def _tool_sku_report(brand, sku):
+    import sku_agents
+    from db import get_engine
+    err = _sku_brand_check(brand)
+    if err:
+        return err
+    found = sku_agents.sku_reports(get_engine(), sku)
+    if "row" not in found:
+        return {"error": "no single SKU matches - ask which one", **found}
+    row = found["row"]
+    return {"sku": row["sku"], "name": row.get("name"), "flags": row.get("flags"),
+            "reports": found["reports"], "page": f"/sku-health/sku/{row['sku']}"}
+
+
+def _tool_recommend_for_sku(brand, sku, goal):
+    import sku_agents
+    from db import get_engine
+    err = _sku_brand_check(brand)
+    if err:
+        return err
+    found = sku_agents.recommend(get_engine(), sku, goal, requested_by="chat")
+    if "recommendation" not in found:
+        return {"error": "no single SKU matches - ask which one", **found}
+    return {"sku": found["row"]["sku"], "goal": goal, "recommendation": found["recommendation"],
+            "report_headlines": {r["department"]: f"{r['status']}: {r['headline']}" for r in found["reports"]}}
+
+
 TOOL_FUNCTIONS = {
     "get_channel_performance": _tool_channel_performance,
     "get_before_after_keywords": _tool_before_after_keywords,
@@ -554,6 +621,8 @@ TOOL_FUNCTIONS = {
     "get_automation_status": _tool_automation_status,
     "file_note": _tool_file_note,
     "get_notes": _tool_get_notes,
+    "get_sku_report": _tool_sku_report,
+    "recommend_for_sku": _tool_recommend_for_sku,
 }
 
 

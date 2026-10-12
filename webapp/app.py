@@ -553,6 +553,94 @@ def api_ondemand_override(unique_key):
     return jsonify({"ok": True})
 
 
+@app.route("/sku-health")
+@login_required
+def sku_health():
+    """Phase 1 of the SKU agents: one row per Voylla Blinkit SKU with sales,
+    stock, price, offer, profit and campaign data, and what is wrong with it."""
+    import sku_intel
+    from db import get_engine
+    flag = request.args.get("flag") or None
+    search = (request.args.get("q") or "").strip()
+    rows = sku_intel.sku_snapshot(get_engine())
+    counts = sku_intel.flag_counts(rows)
+    s = search.lower()
+    shown = [r for r in rows
+             if (not flag or flag in r["flags"])
+             and (not s or s in (r.get("sku") or "").lower() or s in (r.get("name") or "").lower())]
+    shown.sort(key=lambda r: (-len(r["flags"]), -(r.get("units_30d") or 0)))
+    engine = get_engine()
+    ids = sorted({c for r in shown for c in str(r.get("campaign_ids") or "").split(",") if c})
+    names = sku_intel.campaign_names(engine, ids)
+    import sku_actions
+    removals = {f"{c}|{p}": v for (c, p), v in sku_actions.open_removals(engine, sku_intel.BRAND).items()}
+    return render_template("sku_health.html", rows=shown, counts=counts, labels=sku_intel.FLAG_LABELS,
+                           flag=flag, search=search, total=len(rows), campaign_names=names,
+                           removals=removals, active="sku_health")
+
+
+@app.route("/sku-health/sku/<path:sku>")
+@login_required
+def sku_detail(sku):
+    """One SKU: the five department reports and the boss's recommendation for a goal."""
+    import sku_agents
+    from db import get_engine
+    found = sku_agents.sku_reports(get_engine(), sku)
+    if "row" not in found:
+        return redirect(url_for("sku_health", q=sku))
+    return render_template("sku_detail.html", row=found["row"], detail=found["detail"], reports=found["reports"],
+                           goals=sku_agents.GOALS, actions=sku_agents.ACTIONS, active="sku_health")
+
+
+@app.route("/api/sku/boss", methods=["POST"])
+@login_required
+def api_sku_boss():
+    """One boss LLM call for a SKU and a goal. Advice only - changes nothing."""
+    import sku_agents
+    from db import get_engine
+    payload = request.get_json(force=True) or {}
+    goal = payload.get("goal")
+    if goal not in sku_agents.GOALS:
+        return jsonify({"error": f"goal must be one of {list(sku_agents.GOALS)}"}), 400
+    try:
+        out = sku_agents.recommend(get_engine(), payload.get("sku") or "", goal, requested_by="dashboard")
+    except Exception as exc:
+        return jsonify({"error": f"boss failed: {exc}"}), 502
+    if "recommendation" not in out:
+        return jsonify({"error": "SKU not found or not unique"}), 404
+    import json
+    return jsonify({"recommendation": json.loads(json.dumps(out["recommendation"], default=str))})
+
+
+@app.route("/api/sku/removals", methods=["POST"])
+@login_required
+def api_sku_queue_removals():
+    """Queues 'take this product out of this campaign'. The 2 pm push job applies it;
+    nothing is sent to Blinkit from here."""
+    import sku_actions
+    import sku_intel
+    from db import get_engine
+    payload = request.get_json(force=True) or {}
+    items = payload.get("items") or []
+    if not items:
+        return jsonify({"error": "nothing selected"}), 400
+    engine = get_engine()
+    ok, rejected = sku_actions.valid_requests(items, sku_intel.sku_snapshot(engine))
+    added = sku_actions.queue_removals(engine, sku_intel.BRAND, ok, requested_by="dashboard",
+                                       reason=payload.get("reason"))
+    return jsonify({"ok": True, "queued": added, "already_pending": len(ok) - added, "rejected": rejected})
+
+
+@app.route("/api/sku/removals/<int:removal_id>/cancel", methods=["POST"])
+@login_required
+def api_sku_cancel_removal(removal_id):
+    import sku_actions
+    from db import get_engine
+    if not sku_actions.cancel_removal(get_engine(), removal_id):
+        return jsonify({"error": "only a pending removal can be cancelled"}), 400
+    return jsonify({"ok": True})
+
+
 @app.route("/campaigns")
 @login_required
 def campaigns():

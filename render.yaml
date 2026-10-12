@@ -3,7 +3,7 @@ services:
     name: blinkit-control
     runtime: python
     plan: free
-    branch: claude/blinkit-agent-roas-analysis-c4de2b
+    branch: sku-intelligence
     rootDir: webapp
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --timeout 180
