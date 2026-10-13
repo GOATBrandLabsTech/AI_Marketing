@@ -553,6 +553,25 @@ def api_ondemand_override(unique_key):
     return jsonify({"ok": True})
 
 
+@app.route("/auto-tracker")
+@login_required
+def auto_tracker_page():
+    """Auto campaigns since the day Auto started vs before it, by day, week
+    or month, with the brand's other campaigns alongside as the comparison."""
+    import auto_tracker
+    brand = current_brand()
+    if brand == queries.ALL_BRANDS:
+        brand = "Chumbak"
+    session["brand"] = brand
+    granularity = request.args.get("granularity", "day")
+    if granularity not in auto_tracker.BLOCK_DAYS:
+        granularity = "day"
+    start_arg = request.args.get("start")
+    start = date.fromisoformat(start_arg) if start_arg else None
+    data = auto_tracker.tracker(brand, granularity=granularity, start=start)
+    return render_template("auto_tracker.html", t=data, granularity=granularity, active="auto_tracker")
+
+
 @app.route("/sku-health")
 @login_required
 def sku_health():
