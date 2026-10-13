@@ -14,6 +14,10 @@ Owner: Amit (Analytics). Explain things plainly, explain before asking for appro
   never list campaign ids - the Auto switch is the only list (until 2026-10-13 it hard-coded two ids).
   Credentials live outside git (`Python_Scripts` on the PC, `.env.production` on the server).
 - Notebooks in `jobs/` are committed with no outputs (a test checks this).
+- A NEW dashboard page is invisible on reports.goatbrandlabs.in/s/marketing until it is added to `PAGES` in
+  Amal's portal (`/opt/dsr-portal/src/reports/marketing/index.js` on Lightsail, runs as `dsr`, restart with
+  `sudo systemctl restart dsr-portal`). The portal hides our sidebar and 404s any path not listed. Keys have
+  no hyphens (report ids are split on `-`); `needsAllBrands: true` hides a page from brand-restricted accounts.
 - Keep `webapp/tests` green and add a test for every rule that protects money.
 
 ## Safety rules (money is live)
