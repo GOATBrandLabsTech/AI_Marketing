@@ -1,6 +1,7 @@
 @echo off
 rem ---------------------------------------------------------------------------
-rem Scheduled by Windows Task Scheduler (12:30 pm IST).
+rem Manual run only: its Task Scheduler task is disabled. The daily 12:30 pm IST
+rem run is the server cron (see jobs\README.md).
 rem 1. Brings the job copy of AI_Marketing up to date with GitHub main.
 rem 2. Runs jobs\Blinkit_Ondemand_Daily_Suggestions.ipynb from it (jobs\run_job.bat).
 rem Template kept in git: jobs\scheduler_wrappers\Blinkit_Ondemand_Daily_Suggestions.bat
