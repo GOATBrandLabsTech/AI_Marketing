@@ -1,6 +1,6 @@
 @echo off
 rem ---------------------------------------------------------------------------
-rem Scheduled by Windows Task Scheduler (1:00 pm IST).
+rem Scheduled by Windows Task Scheduler (2:00 pm IST).
 rem 1. Brings the job copy of AI_Marketing up to date with GitHub main.
 rem 2. Runs jobs\Blinkit_Ondemand_Bid_Push.ipynb from it (jobs\run_job.bat).
 rem Template kept in git: jobs\scheduler_wrappers\Blinkit_Ondemand_Bid_Push.bat

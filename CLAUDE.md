@@ -7,10 +7,12 @@ Owner: Amit (Analytics). Explain things plainly, explain before asking for appro
 - `main` is the only deploy branch. Work on a feature branch, push, Amit opens/merges the PR.
 - CI (`.github/workflows/ci.yml`) runs `webapp/tests` on every push/PR. The Lightsail server's
   webhook deploy runs the same tests before restarting and rolls back on failure. No server keys in GitHub.
-- The daily jobs (`jobs/`) run on Amit's office PC from a clone that resets to `origin/main` before
-  every run: 1:30 pm IST suggestions (server cron, `oe.run_auto_campaigns()`), 2:00 pm IST Blinkit push
-  (PC Task Scheduler, `jobs/Blinkit_Ondemand_Bid_Push.ipynb`). Credentials live outside git
-  (`Python_Scripts` on the PC, `.env.production` on the server).
+- Daily jobs (details in `jobs/README.md`): 12:30 pm IST suggestions = Lightsail ubuntu crontab
+  (`0 7 * * *` UTC) calling `oe.run_auto_campaigns()` in the deploy checkout, log
+  `/home/ubuntu/ondemand-daily.log`; 2:00 pm IST Blinkit push = PC Task Scheduler running
+  `jobs/Blinkit_Ondemand_Bid_Push.ipynb` from a clone that resets to `origin/main`. The cron line must
+  never list campaign ids - the Auto switch is the only list (until 2026-10-13 it hard-coded two ids).
+  Credentials live outside git (`Python_Scripts` on the PC, `.env.production` on the server).
 - Notebooks in `jobs/` are committed with no outputs (a test checks this).
 - Keep `webapp/tests` green and add a test for every rule that protects money.
 
