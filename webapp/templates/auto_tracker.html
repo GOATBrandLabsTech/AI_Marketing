@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Auto Tracker - Marketing Control{% endblock %}
+{% macro inr(v) %}{% if v is none %}&ndash;{% else %}&#8377;{{ "{:,.0f}".format(v) }}{% endif %}{% endmacro %}
+{% macro roas(v) %}{% if v is none %}&ndash;{% else %}{{ "%.2f"|format(v) }}{% endif %}{% endmacro %}
+{% macro delta(v) %}{% if v is none %}<span style="color:var(--ink-muted)">&ndash;</span>{% else %}<span class="font-semibold" style="color: {{ 'var(--good)' if v > 0 else 'var(--critical)' if v < 0 else 'var(--ink-muted)' }}">{{ '+' if v > 0 else '' }}{{ v }}%</span>{% endif %}{% endmacro %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+  <div>
+    <h1 class="page-title text-2xl font-bold text-ink">Auto Tracker &middot; {{ brand }}</h1>
+    <p class="text-sm mt-0.5 max-w-3xl" style="color:var(--ink-2)">
+      The campaigns set to Auto, from the day Auto started, against the same campaigns before it.
+      The brand's other campaigns run alongside as the comparison: if both move together it is the market, not the AI.
+      Weeks and months are counted from the start date, so no block mixes before and after.
+    </p>
+  </div>
+  {% if t.start %}
+  <form method="get" data-soft class="flex flex-wrap items-end gap-3">
+    <input type="hidden" name="brand" value="{{ brand }}">
+    <input type="hidden" name="granularity" value="{{ granularity }}">
+    <div>
+      <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:var(--ink-muted)">Auto started</label>
+      <select name="start" onchange="this.form.requestSubmit()" class="rounded-lg border text-sm px-2.5 py-1.5" style="border-color:var(--ring)">
+        {% for d in t.start_options %}<option value="{{ d }}" {{ 'selected' if d == t.start else '' }}>{{ d.strftime('%d %b %Y') }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+{% if not t.start %}
+<div class="card p-8 text-center" style="color:var(--ink-muted)">No {{ brand }} campaign is set to Auto yet.</div>
+{% elif t.no_data %}
+<div class="card p-8 text-center" style="color:var(--ink-muted)">No Blinkit ads report rows for {{ brand }} around {{ t.start }}.</div>
+{% else %}
+
+<div class="flex flex-wrap items-center gap-3 mb-4">
+  <div class="inline-flex rounded-lg overflow-hidden border" style="border-color:var(--ring)">
+    {% for g, label in [('day','Daily'),('week','Weekly'),('month','Monthly')] %}
+    <a href="{{ url_for('auto_tracker_page', brand=brand, granularity=g, start=t.start) }}" data-soft
+       class="text-sm font-semibold px-4 py-1.5" style="{{ 'background:var(--brand);color:#fff;' if granularity == g else 'color:var(--ink-2);' }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <span class="text-xs" style="color:var(--ink-muted)">
+    {{ t.auto|length }} Auto campaign(s) &middot; data up to {{ t.last_day.strftime('%d %b') }} &middot;
+    the last 3 report days are still filling in (Blinkit adds ~30% more sales to yesterday later), so the newest numbers will rise.
+  </span>
+</div>
+
+{# ── Summary: before vs since start ─────────────────────────────────────── #}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  {% for title, base, since in [('Auto campaigns', t.baseline, t.since), ('Other campaigns (comparison)', t.other_baseline, t.other_since)] %}
+  <div class="card p-5">
+    <div class="text-[11px] font-semibold uppercase tracking-wide mb-3" style="color:var(--ink-muted)">{{ title }}</div>
+    <div class="grid grid-cols-3 gap-3 text-sm">
+      <div></div>
+      <div class="text-[11px] uppercase" style="color:var(--ink-muted)">Before &middot; {{ base.days }} days</div>
+      <div class="text-[11px] uppercase" style="color:var(--ink-muted)">Since {{ t.start.strftime('%d %b') }} &middot; {{ since.days }} day(s)</div>
+      <div style="color:var(--ink-2)">ROAS</div>
+      <div class="font-display text-xl font-bold">{{ roas(base.roas) }}</div>
+      <div class="font-display text-xl font-bold">{{ roas(since.roas) }} <span class="text-sm">{{ delta(since.roas_vs_base) }}</span></div>
+      <div style="color:var(--ink-2)">Sales / day</div>
+      <div>{{ inr(base.sales_per_day) }}</div>
+      <div>{{ inr(since.sales_per_day) }} <span class="text-xs">{{ delta(since.sales_vs_base) }}</span></div>
+      <div style="color:var(--ink-2)">Spend / day</div>
+      <div>{{ inr(base.spend_per_day) }}</div>
+      <div>{{ inr(since.spend_per_day) }} <span class="text-xs">{{ delta(since.spend_vs_base) }}</span></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ── ROAS trend (inline SVG: Auto solid, other dashed, baseline dotted) ─── #}
+{% set W, H, PAD = 900, 220, 34 %}
+{% set vals = (t.blocks|map(attribute='roas')|select('number')|list) + (t.blocks|map(attribute='other_roas')|select('number')|list) + ([t.baseline.roas] if t.baseline.roas is not none else []) %}
+{% if vals %}
+{% set top = (vals|max) * 1.08 %}{% set lo = (vals|min) * 0.85 %}{% set span = top - lo %}
+{% set n = t.blocks|length %}
+{% set step = (W - 2 * PAD) / ((n - 1) if n > 1 else 1) %}
+<div class="card p-5 mb-6">
+  <div class="text-[11px] font-semibold uppercase tracking-wide mb-2" style="color:var(--ink-muted)">ROAS by {{ {'day':'day','week':'week','month':'30-day block'}[granularity] }}</div>
+  <svg viewBox="0 0 {{ W }} {{ H }}" class="w-full h-auto" role="img" aria-label="ROAS trend">
+    {% set start_idx = namespace(i=none) %}
+    {% for b in t.blocks %}{% if b.after and start_idx.i is none %}{% set start_idx.i = loop.index0 %}{% endif %}{% endfor %}
+    {% if start_idx.i is not none %}
+    {% set sx = PAD + start_idx.i * step - (step / 2 if start_idx.i > 0 else 0) %}
+    <rect x="{{ sx }}" y="{{ PAD / 2 }}" width="{{ W - PAD - sx }}" height="{{ H - 1.5 * PAD }}" fill="var(--brand)" opacity="0.06"/>
+    <text x="{{ sx - 6 if sx > W * 0.7 else sx + 6 }}" y="{{ PAD / 2 + 14 }}" font-size="12" text-anchor="{{ 'end' if sx > W * 0.7 else 'start' }}" fill="var(--brand)">Auto from {{ t.start.strftime('%d %b') }}</text>
+    {% endif %}
+    {% if t.baseline.roas is not none %}
+    {% set by = H - PAD - ((t.baseline.roas - lo) / span) * (H - 2 * PAD) %}
+    <line x1="{{ PAD }}" x2="{{ W - PAD }}" y1="{{ by }}" y2="{{ by }}" stroke="var(--ink-muted)" stroke-dasharray="2 4"/>
+    <text x="{{ PAD }}" y="{{ by - 4 }}" font-size="11" text-anchor="start" fill="var(--ink-muted)">before avg {{ roas(t.baseline.roas) }}</text>
+    {% endif %}
+    {% for key, dash, color in [('other_roas', '6 4', 'var(--ink-muted)'), ('roas', '', 'var(--brand)')] %}
+    {% set pts = namespace(s='') %}
+    {% for b in t.blocks %}{% if b[key] is not none %}{% set pts.s = pts.s ~ ' ' ~ (PAD + loop.index0 * step)|round(1) ~ ',' ~ (H - PAD - ((b[key] - lo) / span) * (H - 2 * PAD))|round(1) %}{% endif %}{% endfor %}
+    <polyline points="{{ pts.s }}" fill="none" stroke="{{ color }}" stroke-width="{{ 2.5 if key == 'roas' else 1.5 }}" {% if dash %}stroke-dasharray="{{ dash }}"{% endif %}/>
+    {% endfor %}
+    {% for b in t.blocks %}
+    {% if b.roas is not none %}
+    <circle cx="{{ PAD + loop.index0 * step }}" cy="{{ H - PAD - ((b.roas - lo) / span) * (H - 2 * PAD) }}" r="3.5"
+            fill="{{ 'var(--card, #fff)' if b.settling else 'var(--brand)' }}" stroke="var(--brand)" stroke-width="1.5"><title>{{ b.label }}: ROAS {{ roas(b.roas) }}{{ ' (still filling in)' if b.settling else '' }}</title></circle>
+    {% endif %}
+    {% if n <= 16 or loop.index0 % 2 == 0 %}
+    <text x="{{ PAD + loop.index0 * step }}" y="{{ H - 8 }}" font-size="11" text-anchor="middle" fill="var(--ink-muted)">{{ b.label }}</text>
+    {% endif %}
+    {% endfor %}
+  </svg>
+  <div class="flex flex-wrap gap-4 text-xs mt-1" style="color:var(--ink-muted)">
+    <span><span class="inline-block w-5 align-middle" style="border-top:2.5px solid var(--brand)"></span> Auto campaigns</span>
+    <span><span class="inline-block w-5 align-middle" style="border-top:1.5px dashed var(--ink-muted)"></span> Other campaigns</span>
+    <span>Hollow dot = still filling in</span>
+  </div>
+</div>
+{% endif %}
+
+{# ── Period table ───────────────────────────────────────────────────────── #}
+<div class="card overflow-hidden mb-6">
+  <div class="overflow-x-auto">
+    <table class="data w-full text-sm">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-3 py-3">{{ {'day':'Day','week':'Week','month':'30-day block'}[granularity] }}</th>
+          <th class="px-3 py-3">Dates</th>
+          <th class="px-3 py-3 text-right">Spend</th>
+          <th class="px-3 py-3 text-right">Sales</th>
+          <th class="px-3 py-3 text-right">ROAS</th>
+          <th class="px-3 py-3 text-right">ROAS vs before</th>
+          <th class="px-3 py-3 text-right">Sales/day vs before</th>
+          <th class="px-3 py-3 text-right">Spend/day vs before</th>
+          <th class="px-3 py-3 text-right">Other campaigns ROAS</th>
+          <th class="px-3 py-3 text-right">Other vs before</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in t.blocks|reverse %}
+        <tr class="border-b" style="border-color:var(--grid); {{ '' if b.after else 'opacity:.7;' }}">
+          <td class="px-3 py-2 font-semibold">{{ b.label }}
+            {% if b.after %}<span class="text-[10px] uppercase ml-1 px-1.5 py-0.5 rounded" style="background:var(--brand);color:#fff">Auto</span>{% endif %}
+            {% if b.settling %}<span class="text-[10px] ml-1" style="color:var(--ink-muted)" title="Blinkit is still adding sales to these days">filling in</span>{% endif %}
+          </td>
+          <td class="px-3 py-2 whitespace-nowrap" style="color:var(--ink-2)">{{ b.start.strftime('%d %b') }}{% if b.end != b.start %} &ndash; {{ b.end.strftime('%d %b') }}{% endif %}{% if b.partial %} <span class="text-xs">({{ b.days }} day{{ 's' if b.days != 1 else '' }} in)</span>{% endif %}</td>
+          <td class="px-3 py-2 text-right">{{ inr(b.spend) }}</td>
+          <td class="px-3 py-2 text-right">{{ inr(b.sales) }}</td>
+          <td class="px-3 py-2 text-right font-semibold">{{ roas(b.roas) }}</td>
+          <td class="px-3 py-2 text-right">{{ delta(b.roas_vs_base) }}</td>
+          <td class="px-3 py-2 text-right">{{ delta(b.sales_vs_base) }}</td>
+          <td class="px-3 py-2 text-right">{{ delta(b.spend_vs_base) }}</td>
+          <td class="px-3 py-2 text-right">{{ roas(b.other_roas) }}</td>
+          <td class="px-3 py-2 text-right">{{ delta(b.other_roas_vs_base) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="px-4 py-3 text-xs" style="color:var(--ink-muted)">
+    "Before" = all the faded rows together ({{ t.baseline.days }} days before {{ t.start.strftime('%d %b') }}).
+    Per-day figures are compared, so a part-filled week or month is fair against a full one.
+  </div>
+</div>
+
+{# ── Per campaign ───────────────────────────────────────────────────────── #}
+<div class="card overflow-hidden">
+  <div class="px-4 pt-4 pb-2">
+    <div class="text-[11px] font-semibold uppercase tracking-wide" style="color:var(--ink-muted)">By campaign &middot; 14 days before its own Auto start vs every day since</div>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="data w-full text-sm">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-3 py-3">Campaign</th>
+          <th class="px-3 py-3">Auto since</th>
+          <th class="px-3 py-3 text-right">ROAS before</th>
+          <th class="px-3 py-3 text-right">ROAS since</th>
+          <th class="px-3 py-3 text-right">Change</th>
+          <th class="px-3 py-3 text-right">Sales/day before &rarr; since</th>
+          <th class="px-3 py-3 text-right">Spend/day before &rarr; since</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in t.campaigns %}
+        <tr class="border-b" style="border-color:var(--grid)">
+          <td class="px-3 py-2"><div class="font-semibold">{{ c.campaign_name }}</div><div class="text-xs" style="color:var(--ink-muted)">#{{ c.campaign_id }}</div></td>
+          <td class="px-3 py-2 whitespace-nowrap">{{ c.start.strftime('%d %b') }} <span class="text-xs" style="color:var(--ink-muted)">({{ c.after_days }}d)</span></td>
+          <td class="px-3 py-2 text-right">{{ roas(c.roas_before) }}</td>
+          <td class="px-3 py-2 text-right font-semibold">{{ roas(c.roas_after) }}</td>
+          <td class="px-3 py-2 text-right">{{ delta(c.roas_change) }}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">{{ inr(c.sales_before_pd) }} &rarr; {{ inr(c.sales_after_pd) }}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">{{ inr(c.spend_before_pd) }} &rarr; {{ inr(c.spend_after_pd) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
