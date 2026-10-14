@@ -84,7 +84,8 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
   `0 7 * * * cd /home/ubuntu/blinkit-marketing-repo/webapp && set -a && . ./.env.production && set +a &&
   /home/ubuntu/blinkitwebvenv/bin/python -c "import ondemand_engine as oe; print(oe.run_auto_campaigns())" >> /home/ubuntu/ondemand-daily.log 2>&1`
 - Portal `PAGES` (dsr-portal, hand-edited by Amit 2026-10-13, backup `index.js.bak-20261013`) now lists
-  `autotracker` (/auto-tracker) and `skuhealth` (/sku-health, needsAllBrands). An update by Amal may overwrite it.
+  `skuhealth` (/sku-health, needsAllBrands); it also lists `autotracker` (/auto-tracker), a page removed on 2026-10-14:
+  delete that entry. An update by Amal may overwrite the file.
 - Deploy log on server: `/home/ubuntu/ai-marketing-deploys.log`. Dashboard = systemd `blinkit-marketing` (gunicorn 127.0.0.1:3002).
 
 ## Session log 2026-10-13 / 14
@@ -98,11 +99,21 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
 - Before any live push we check: the due list is only today's rows, only Auto campaigns, and each row's
   `current_cpm` equals live `Blinkit_CPM.cpm` (the push applies bid_change to the ROW's current_cpm, and rebuilds
   the rest of the keyword list from `Blinkit_CPM`).
-- Built `/auto-tracker` (`webapp/auto_tracker.py`, `templates/auto_tracker.html`, `tests/test_auto_tracker.py`):
+- Built `/auto-tracker` (removed 2026-10-14 at Amit's request: ROAS Impact covers it; renamed Ads Performance, see below).
   Auto campaigns vs before their start, Daily/Weekly/Monthly in 1/7/30-day blocks counted FROM the start date
   (not calendar weeks), ROAS = total sales / total spend, the brand's non-Auto campaigns as the comparison line,
   per-campaign table from each campaign's own switch date. No chart library (inline SVG). Day 1 (10-12):
   Auto ROAS 4.75 -> 4.47 (-6%), other campaigns 6.76 -> 4.24 (-37%) - too early to read.
+
+## Ads Performance (`/roas`, was ROAS Impact; 2026-10-14)
+- AI-managed scope has a campaign picker (`?campaigns=` repeated; `queries.pick_campaigns`, default all AI campaigns).
+- Laid out like Blinkit's own dashboard: date range (`range` = 7/15/30/90/this_month/last_month/custom + `from`/`to`,
+  `queries.resolve_range`, default last 30 days ending yesterday), metric cards with tick boxes (budget spent, impressions,
+  add to carts, quantity sold, sales, ROAS, CTR, CPM; totals for the range + % vs the previous period of the same length),
+  every ticked card is one line on its own scale. CTR = ATC / impressions, as the bid engine uses (Blinkit has no clicks).
+  One metric alone: before/after split at the cutover + dashed line = the brand's non-AI campaigns
+  (`fetch_channel_daily(exclude_ids=)`). Triangles = days the AI pushed bids (`fetch_push_counts`).
+  Before/after table for all metrics; 30-day ROAS sparkline per campaign.
 
 ## Open items (next session)
 - Chumbak 607168 malformed reply (13-14 Oct, "Recovered N objects", rest backfilled at 0.70 -> REVIEW): fixed
@@ -111,7 +122,7 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
   (`SUGGESTION_SCHEMA`) for supported models, and a cut-off/refused reply saves nothing (error) instead of
   half + backfill. Confirm on the next run: 607168 rows auto-accepted, no "Recovered" line in the cron log.
 - Repeated cuts: ladies bag (607078) cut 5 times since 10-08 (now 487); women hand bag (354499) 965->885->805;
-  tote bag 685->617->543. Watch on Auto Tracker whether ROAS actually improves; the floor (Rs 200) is the only stop.
+  tote bag 685->617->543. Watch on Ads Performance (pick those campaigns) whether ROAS actually improves; the floor (Rs 200) is the only stop.
 - After deleting/regenerating a day, the pushed history is lost (the AI's cooldown/escalation reads it). Prefer
   not to delete pushed rows.
 - `HANDOFF.md` is from 2026-09-15 and out of date; this file is the current source.

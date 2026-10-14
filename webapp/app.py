@@ -220,17 +220,29 @@ def roas():
         scope = request.args.get("scope") or ("ai" if ai_ids else "all")
         if scope not in ("ai", "all") or (scope == "ai" and not ai_ids):
             scope = "all"
-        campaign_ids = ai_ids if scope == "ai" else None
+        # campaign picker: any subset of the AI-managed campaigns (default all)
+        selected_ids = queries.pick_campaigns(",".join(request.args.getlist("campaigns")), ai_ids) if ai_ids else []
+        campaign_ids = selected_ids if scope == "ai" else None
 
         daily_channel = queries.fetch_channel_daily(brand, days=365, campaign_ids=campaign_ids)
-        if granularity == "day":
-            # a year of individual days is illegible as a line chart - zoom
-            # the day view around the cutover; week/month keep the full year
-            # since bucketing already compresses it.
-            chart_start = cutover_date - timedelta(days=max(30, window_days * 3))
-            daily_for_chart = [d for d in daily_channel if chart_start <= d["date"]]
-        else:
-            daily_for_chart = daily_channel
+        # the brand's campaigns the AI does not run, as the comparison line: a
+        # festive week lifts everything, and should not be credited to the AI
+        daily_others = (queries.fetch_channel_daily(brand, days=365, exclude_ids=ai_ids)
+                        if scope == "ai" else [])
+        # the trend's date range, like Blinkit's own dashboard: presets or custom
+        range_preset, chart_start, chart_end = queries.resolve_range(
+            request.args.get("range"), request.args.get("from"), request.args.get("to"), date.today())
+        span = (chart_end - chart_start).days + 1
+        totals = queries.period_totals(daily_channel, chart_start, chart_end)
+        prev_totals = queries.period_totals(daily_channel, chart_start - timedelta(days=span),
+                                            chart_start - timedelta(days=1))
+        daily_for_chart = [d for d in daily_channel if chart_start <= d["date"] <= chart_end]
+        others_for_chart = [d for d in daily_others if chart_start <= d["date"] <= chart_end]
+        trend = queries.attach_comparison(
+            queries.bucket_channel_series(daily_for_chart, granularity),
+            queries.bucket_channel_series(others_for_chart, granularity),
+            queries.fetch_push_counts(brand, selected_ids, chart_start),
+            granularity)
 
         if granularity == "week":
             iso = cutover_date.isocalendar()
@@ -241,8 +253,18 @@ def roas():
             cutover_label = str(cutover_date)
 
         channel = {
-            "trend": queries.bucket_channel_series(daily_for_chart, granularity),
+            "trend": trend,
+            "range": {"preset": range_preset, "start": chart_start, "end": chart_end, "days": span,
+                      "presets": queries.RANGE_PRESETS},
+            "totals": totals,
+            "vs_prev": queries.compare_totals(totals, prev_totals),
             "before_after": queries.channel_before_after(daily_channel, cutover_date, window_days),
+            "others_before_after": (queries.channel_before_after(daily_others, cutover_date, window_days)
+                                    if daily_others else None),
+            "campaign_options": queries.fetch_ai_campaign_options(brand, ai_ids),
+            "selected_ids": [str(i) for i in selected_ids],
+            "all_selected": len(selected_ids) == len(ai_ids),
+            "campaigns_arg": ",".join(str(i) for i in selected_ids) if len(selected_ids) != len(ai_ids) else None,
             "cutover_date": cutover_date,
             "cutover_label": cutover_label,
             "window_days": window_days,
@@ -250,14 +272,19 @@ def roas():
             "scoped_to_showcase": brand == "Chumbak" and scope == "ai",
             "scope": scope,
             "ai_campaign_count": len(ai_ids),
+            "selected_count": len(selected_ids),
             # Blinkit keeps adding sales to recent days (~30% for yesterday),
             # so the last few points are drawn as still settling.
             "settling_from": str(date.today() - timedelta(days=SETTLING_DAYS)),
             "settling_days": SETTLING_DAYS,
             "decisions_on_cutover": queries.count_ondemand_decisions_on_date(brand, cutover_date),
-            "scoreboard": (queries.fetch_campaign_scoreboard(brand, ai_ids, cutover_date, window_days)
+            "scoreboard": (queries.fetch_campaign_scoreboard(brand, selected_ids, cutover_date, window_days)
                            if scope == "ai" else []),
         }
+        if channel["scoreboard"]:
+            sparks = queries.fetch_campaign_roas_daily(brand, selected_ids, days=30)
+            for c in channel["scoreboard"]:
+                c["spark"] = queries.sparkline_points(sparks.get(str(c["cid"])))
 
     return render_template(
         "roas.html",
@@ -551,25 +578,6 @@ def api_ondemand_override(unique_key):
         payload.get("note"),
     )
     return jsonify({"ok": True})
-
-
-@app.route("/auto-tracker")
-@login_required
-def auto_tracker_page():
-    """Auto campaigns since the day Auto started vs before it, by day, week
-    or month, with the brand's other campaigns alongside as the comparison."""
-    import auto_tracker
-    brand = current_brand()
-    if brand == queries.ALL_BRANDS:
-        brand = "Chumbak"
-    session["brand"] = brand
-    granularity = request.args.get("granularity", "day")
-    if granularity not in auto_tracker.BLOCK_DAYS:
-        granularity = "day"
-    start_arg = request.args.get("start")
-    start = date.fromisoformat(start_arg) if start_arg else None
-    data = auto_tracker.tracker(brand, granularity=granularity, start=start)
-    return render_template("auto_tracker.html", t=data, granularity=granularity, active="auto_tracker")
 
 
 @app.route("/sku-health")
