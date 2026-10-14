@@ -105,10 +105,11 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
   Auto ROAS 4.75 -> 4.47 (-6%), other campaigns 6.76 -> 4.24 (-37%) - too early to read.
 
 ## Open items (next session)
-- Chumbak 607168 (9 keywords): two days running the LLM reply was malformed ("Recovered N objects via
-  character-level parsing"), confidence defaulted to 0.70 -> quick_action REVIEW -> never auto-accepted.
-  Likely the reply is cut off for the biggest keyword list; look at max_tokens / output parsing in
-  `ondemand_engine.generate_ondemand_suggestions`. Its rows wait for a manual accept.
+- Chumbak 607168 malformed reply (13-14 Oct, "Recovered N objects", rest backfilled at 0.70 -> REVIEW): fixed
+  2026-10-14 in `generate_ondemand_suggestions` - Sonnet 5.5 thinks by default and thinking counts against
+  max_tokens (was 12000). Now: `SUGGESTION_MAX_TOKENS` 32000, streamed, structured outputs
+  (`SUGGESTION_SCHEMA`) for supported models, and a cut-off/refused reply saves nothing (error) instead of
+  half + backfill. Confirm on the next run: 607168 rows auto-accepted, no "Recovered" line in the cron log.
 - Repeated cuts: ladies bag (607078) cut 5 times since 10-08 (now 487); women hand bag (354499) 965->885->805;
   tote bag 685->617->543. Watch on Auto Tracker whether ROAS actually improves; the floor (Rs 200) is the only stop.
 - After deleting/regenerating a day, the pushed history is lost (the AI's cooldown/escalation reads it). Prefer

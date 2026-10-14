@@ -178,6 +178,71 @@ def _log_model_run(engine, brand, campaign_id, model, role, usage, rows):
         print(f"  [model-log] could not log {role} run for {campaign_id}: {exc}")
 
 
+# Suggestion replies. Claude 5-family models think before answering and that
+# thinking counts against max_tokens: at 12000 the reply for a big keyword list
+# was cut off mid-JSON (Chumbak 607168, 13-14 Oct: "Recovered N objects", the
+# rest backfilled at confidence 0.70 -> REVIEW -> never auto-accepted). Room for
+# both, streamed so a long call does not hit the HTTP timeout.
+SUGGESTION_MAX_TOKENS = 32000
+
+# Models that support structured outputs (output_config.format): the API then
+# guarantees the reply is JSON matching SUGGESTION_SCHEMA, so nothing has to be
+# repaired or recovered. Other models keep the plain-text reply + extract_json.
+STRUCTURED_OUTPUT_MODELS = ("claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-sonnet-5",
+                            "claude-haiku-5", "claude-opus-4-8", "claude-haiku-4-5",
+                            "claude-opus-4-5", "claude-opus-4-1")
+
+_NUM_OR_NULL = {"anyOf": [{"type": "number"}, {"type": "null"}]}
+SUGGESTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "suggestions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "string"},
+                    "campaign_name": {"type": "string"},
+                    "targeting": {"type": "string"},
+                    "action": {"type": "string"},
+                    "cpm_change": _NUM_OR_NULL,
+                    "confidence": {"type": "number"},
+                    "explanation": {"type": "string"},
+                    "alternative_keywords": {"type": "array", "items": {"type": "string"}},
+                    "current_cpm": _NUM_OR_NULL,
+                    "campaign_budget": _NUM_OR_NULL,
+                },
+                "required": ["campaign_id", "campaign_name", "targeting", "action", "cpm_change",
+                             "confidence", "explanation", "alternative_keywords", "current_cpm",
+                             "campaign_budget"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["suggestions"],
+    "additionalProperties": False,
+}
+
+
+def _structured_outputs(model):
+    return str(model or "").startswith(STRUCTURED_OUTPUT_MODELS)
+
+
+def _suggestions_from_reply(resp, structured):
+    """The suggestion list from one model reply. Refuses a cut-off or declined
+    reply outright: saving half a campaign's decisions (the rest backfilled by
+    the rule engine) is worse than saving none and saying why."""
+    stop = getattr(resp, "stop_reason", None)
+    if stop == "max_tokens":
+        raise ValueError(f"reply cut off at the {SUGGESTION_MAX_TOKENS}-token limit - nothing saved")
+    if stop == "refusal":
+        raise ValueError("the model declined to answer - nothing saved")
+    raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+    if structured:
+        return json.loads(raw)["suggestions"]
+    return extract_json(raw)
+
+
 def _temperature_kwargs(model):
     """Claude 5-family models reject `temperature`; older ones take 0 for
     repeatable decisions."""
@@ -2823,16 +2888,22 @@ def generate_ondemand_suggestions(brand, campaign_id, requested_by=None, model_o
         system_blocks = [{"type": "text", "text": SYSTEM_PROMPT}, KEYWORD_POOL_BLOCK]
         prompt = user_message
 
+    structured = _structured_outputs(model)
+    if structured:
+        prompt += ('\n        Return the array as {"suggestions": [...]} - one object per keyword, '
+                   'with exactly the fields listed above.\n')
     try:
-        resp = client.messages.create(
+        with client.messages.stream(
             model=model,
-            max_tokens=12000,
+            max_tokens=SUGGESTION_MAX_TOKENS,
             **_temperature_kwargs(model),
+            **({"output_config": {"format": {"type": "json_schema", "schema": SUGGESTION_SCHEMA}}}
+               if structured else {}),
             system=system_blocks,
             messages=[{"role": "user", "content": prompt}],
-        )
-        raw_response = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-        suggestion_response = extract_json(raw_response)
+        ) as stream:
+            resp = stream.get_final_message()
+        suggestion_response = _suggestions_from_reply(resp, structured)
     except Exception as e:
         return {"ok": False, "count": 0, "rows": [], "error": f"LLM call failed: {e}"}
 
