@@ -1,4 +1,5 @@
 # Blinkit Marketing Control — handoff
+> **Out of date (written 2026-09-15).** The current notes are in `CLAUDE.md` (live state, safety rules, session log, open items). Kept for history only.
 
 Written 2026-09-15, for picking this up on a different PC (e.g. the shared
 server the Voylla task tracker runs on). This is the single doc to hand a

@@ -14,6 +14,10 @@ Owner: Amit (Analytics). Explain things plainly, explain before asking for appro
   never list campaign ids - the Auto switch is the only list (until 2026-10-13 it hard-coded two ids).
   Credentials live outside git (`Python_Scripts` on the PC, `.env.production` on the server).
 - Notebooks in `jobs/` are committed with no outputs (a test checks this).
+- A NEW dashboard page is invisible on reports.goatbrandlabs.in/s/marketing until it is added to `PAGES` in
+  Amal's portal (`/opt/dsr-portal/src/reports/marketing/index.js` on Lightsail, runs as `dsr`, restart with
+  `sudo systemctl restart dsr-portal`). The portal hides our sidebar and 404s any path not listed. Keys have
+  no hyphens (report ids are split on `-`); `needsAllBrands: true` hides a page from brand-restricted accounts.
 - Keep `webapp/tests` green and add a test for every rule that protects money.
 
 ## Safety rules (money is live)
@@ -63,3 +67,50 @@ targeting, price/offer, channel shift, or mark dead). Voylla only for now. Read-
 - Phase 3: boss recommendations become approvable actions.
 Open items: confirm the config reply shape fills the city master (the job prints its top-level keys if not);
 16 Blinkit warehouses missing from `QC_City_Mappping`; how often the offers file is refreshed.
+
+## Working from a cloud session (read first)
+A cloud session has this repo only. It does NOT have: the Postgres credentials (`Python_Scripts\Voylla_Cred.txt`
+on the PC / `.env.production` on the server), the office PC (Task Scheduler, push job, Blinkit login mailbox),
+or SSH to Lightsail (no key; Amal owns the box). So: write code + tests, push a feature branch, Amit merges.
+Anything needing live data, the server or a live push -> give Amit the exact commands and ask him to paste output.
+Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN = False`) and sends real bids.
+
+## Live state (2026-10-14)
+- Auto campaigns (`campaign_autonomy_mode.mode='auto'`): Voylla 296464 (since 2026-09-18); Chumbak 607078
+  (since 2026-10-08) + 354499, 354509, 359470, 359869, 379520, 429819, 497432, 497437, 607168, 500151, 624587
+  (since 2026-10-12). 500151 and 624587 are STOPPED on Blinkit, so the daily run skips them (11 run).
+- Push notebook `DRY_RUN = False` (live), `REMOVALS_DRY_RUN = True`.
+- Server crontab line (Amit-edited 2026-10-13, backup `~/crontab.backup_2026-10-13`):
+  `0 7 * * * cd /home/ubuntu/blinkit-marketing-repo/webapp && set -a && . ./.env.production && set +a &&
+  /home/ubuntu/blinkitwebvenv/bin/python -c "import ondemand_engine as oe; print(oe.run_auto_campaigns())" >> /home/ubuntu/ondemand-daily.log 2>&1`
+- Portal `PAGES` (dsr-portal, hand-edited by Amit 2026-10-13, backup `index.js.bak-20261013`) now lists
+  `autotracker` (/auto-tracker) and `skuhealth` (/sku-health, needsAllBrands). An update by Amal may overwrite it.
+- Deploy log on server: `/home/ubuntu/ai-marketing-deploys.log`. Dashboard = systemd `blinkit-marketing` (gunicorn 127.0.0.1:3002).
+
+## Session log 2026-10-13 / 14
+- Found: the server cron hard-coded `[('Voylla',['296464']),('Chumbak',['607078'])]`, so the 9 Chumbak campaigns
+  switched to Auto on 10-12 never got daily suggestions (also `CLAUDE.md` wrongly said 1:30 / run_auto_campaigns).
+  Fixed the cron to `run_auto_campaigns()`; 10-14 run covered all 11 (12:30-12:38 IST, 39 suggestions, 14 changes).
+- 10-13: deleted that day's 607078 rows (backup `Python_Scripts\logs\ondemand_actions_backup_2026-10-13.csv`;
+  2 of them had already been pushed: ladies bag 601->541, sling bag gift for women 847->915), re-ran
+  `run_auto_campaigns()` for real, then pushed 10 changes over 8 Chumbak campaigns. 10-14: pushed 12 changes over
+  8 campaigns manually before 2 pm (first try died on a DB connection blip; nothing was sent).
+- Before any live push we check: the due list is only today's rows, only Auto campaigns, and each row's
+  `current_cpm` equals live `Blinkit_CPM.cpm` (the push applies bid_change to the ROW's current_cpm, and rebuilds
+  the rest of the keyword list from `Blinkit_CPM`).
+- Built `/auto-tracker` (`webapp/auto_tracker.py`, `templates/auto_tracker.html`, `tests/test_auto_tracker.py`):
+  Auto campaigns vs before their start, Daily/Weekly/Monthly in 1/7/30-day blocks counted FROM the start date
+  (not calendar weeks), ROAS = total sales / total spend, the brand's non-Auto campaigns as the comparison line,
+  per-campaign table from each campaign's own switch date. No chart library (inline SVG). Day 1 (10-12):
+  Auto ROAS 4.75 -> 4.47 (-6%), other campaigns 6.76 -> 4.24 (-37%) - too early to read.
+
+## Open items (next session)
+- Chumbak 607168 (9 keywords): two days running the LLM reply was malformed ("Recovered N objects via
+  character-level parsing"), confidence defaulted to 0.70 -> quick_action REVIEW -> never auto-accepted.
+  Likely the reply is cut off for the biggest keyword list; look at max_tokens / output parsing in
+  `ondemand_engine.generate_ondemand_suggestions`. Its rows wait for a manual accept.
+- Repeated cuts: ladies bag (607078) cut 5 times since 10-08 (now 487); women hand bag (354499) 965->885->805;
+  tote bag 685->617->543. Watch on Auto Tracker whether ROAS actually improves; the floor (Rs 200) is the only stop.
+- After deleting/regenerating a day, the pushed history is lost (the AI's cooldown/escalation reads it). Prefer
+  not to delete pushed rows.
+- `HANDOFF.md` is from 2026-09-15 and out of date; this file is the current source.
