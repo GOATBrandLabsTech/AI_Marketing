@@ -61,3 +61,9 @@ def test_push_applies_sku_removals_safely():
     assert "REMOVALS_DRY_RUN = True" in code
     assert "sku_actions.products_after_removal(" in code
     assert "sku_actions.mark_removals(engine, removal_ids" in code
+
+
+def test_push_email_shows_old_and_new_bid():
+    code = _code(_load(NOTEBOOKS[1]))
+    assert "push_report.change_lines(" in code and "old_cpm_by_kw" in code
+    assert 'f"  {kw}: -> {cpm}"' not in code
