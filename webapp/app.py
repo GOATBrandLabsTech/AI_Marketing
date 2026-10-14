@@ -229,15 +229,15 @@ def roas():
         # festive week lifts everything, and should not be credited to the AI
         daily_others = (queries.fetch_channel_daily(brand, days=365, exclude_ids=ai_ids)
                         if scope == "ai" else [])
-        if granularity == "day":
-            # a year of individual days is illegible as a line chart - zoom
-            # the day view around the cutover; week/month keep the full year
-            # since bucketing already compresses it.
-            chart_start = cutover_date - timedelta(days=max(30, window_days * 3))
-        else:
-            chart_start = date.today() - timedelta(days=365)
-        daily_for_chart = [d for d in daily_channel if chart_start <= d["date"]]
-        others_for_chart = [d for d in daily_others if chart_start <= d["date"]]
+        # the trend's date range, like Blinkit's own dashboard: presets or custom
+        range_preset, chart_start, chart_end = queries.resolve_range(
+            request.args.get("range"), request.args.get("from"), request.args.get("to"), date.today())
+        span = (chart_end - chart_start).days + 1
+        totals = queries.period_totals(daily_channel, chart_start, chart_end)
+        prev_totals = queries.period_totals(daily_channel, chart_start - timedelta(days=span),
+                                            chart_start - timedelta(days=1))
+        daily_for_chart = [d for d in daily_channel if chart_start <= d["date"] <= chart_end]
+        others_for_chart = [d for d in daily_others if chart_start <= d["date"] <= chart_end]
         trend = queries.attach_comparison(
             queries.bucket_channel_series(daily_for_chart, granularity),
             queries.bucket_channel_series(others_for_chart, granularity),
@@ -254,6 +254,10 @@ def roas():
 
         channel = {
             "trend": trend,
+            "range": {"preset": range_preset, "start": chart_start, "end": chart_end, "days": span,
+                      "presets": queries.RANGE_PRESETS},
+            "totals": totals,
+            "vs_prev": queries.compare_totals(totals, prev_totals),
             "before_after": queries.channel_before_after(daily_channel, cutover_date, window_days),
             "others_before_after": (queries.channel_before_after(daily_others, cutover_date, window_days)
                                     if daily_others else None),

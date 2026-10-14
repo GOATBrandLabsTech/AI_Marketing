@@ -33,11 +33,11 @@
       {% endif %}
       <div class="flex rounded-lg overflow-hidden border mt-3 w-max" style="border-color:rgba(255,255,255,.15)">
         {% if channel.ai_campaign_count %}
-        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='ai', campaigns=channel.campaigns_arg) }}" data-soft
+        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='ai', campaigns=channel.campaigns_arg, range=channel.range.preset, **({'from': channel.range.start, 'to': channel.range.end} if channel.range.preset == 'custom' else {})) }}" data-soft
            class="text-xs font-semibold px-3 py-1.5"
            style="{{ 'background:var(--brand);color:#fff;' if channel.scope == 'ai' else 'background:rgba(255,255,255,.06);color:#9fb3d1;' }}">AI-managed campaigns</a>
         {% endif %}
-        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='all') }}" data-soft
+        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='all', range=channel.range.preset, **({'from': channel.range.start, 'to': channel.range.end} if channel.range.preset == 'custom' else {})) }}" data-soft
            class="text-xs font-semibold px-3 py-1.5"
            style="{{ 'background:var(--brand);color:#fff;' if channel.scope == 'all' else 'background:rgba(255,255,255,.06);color:#9fb3d1;' }}">Whole channel</a>
       </div>
@@ -54,6 +54,9 @@
           <input type="hidden" name="window_days" value="{{ channel.window_days }}">
           <input type="hidden" name="granularity" value="{{ channel.granularity }}">
           <input type="hidden" name="scope" value="ai">
+          <input type="hidden" name="range" value="{{ channel.range.preset }}">
+          <input type="hidden" name="from" value="{{ channel.range.start }}">
+          <input type="hidden" name="to" value="{{ channel.range.end }}">
           <div class="flex flex-wrap gap-3 mb-2 text-xs">
             <button type="button" class="underline" style="color:#9fb3d1" onclick="pickCampaigns(this.form, 'all')">Select all</button>
             <button type="button" class="underline" style="color:#9fb3d1" onclick="pickCampaigns(this.form, 'auto')">Only Auto</button>
@@ -91,6 +94,25 @@
     <input type="hidden" name="scope" value="{{ channel.scope }}">
     {% if channel.scope == 'ai' %}{% for cid in channel.selected_ids %}<input type="hidden" name="campaigns" value="{{ cid }}">{% endfor %}{% endif %}
     <div>
+      <label for="rangePreset" class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Date range</label>
+      <select id="rangePreset" name="range" onchange="toggleCustom(this); if (this.value !== 'custom') this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+        {% for key, label in channel.range.presets.items() %}
+        <option value="{{ key }}" {{ 'selected' if key == channel.range.preset else '' }} style="color:#111">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="customRange" class="flex items-end gap-2" {{ '' if channel.range.preset == 'custom' else 'hidden' }}>
+      <div>
+        <label for="rangeFrom" class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">From</label>
+        <input id="rangeFrom" type="date" name="from" value="{{ channel.range.start }}" class="rounded-lg text-sm px-2.5 py-1 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15); color-scheme:dark">
+      </div>
+      <div>
+        <label for="rangeTo" class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">To</label>
+        <input id="rangeTo" type="date" name="to" value="{{ channel.range.end }}" class="rounded-lg text-sm px-2.5 py-1 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15); color-scheme:dark">
+      </div>
+      <button class="text-xs font-semibold rounded-lg px-3 py-1.5 text-white" style="background:var(--brand)">Apply</button>
+    </div>
+    <div>
       <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Action date (cutover)</label>
       <select name="cutover" onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
         {% for d in action_dates %}
@@ -115,14 +137,36 @@
   </form>
 
   <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
-    <div class="flex flex-wrap rounded-lg overflow-hidden border w-max max-w-full mb-3" style="border-color:rgba(255,255,255,.15)" role="group" aria-label="Metric">
-      {% for key, label in [('roas','ROAS'),('spend','Spend'),('sales','Sales'),('impressions','Impressions'),('ctr','CTR'),('atc','Add to carts'),('cpm','CPM')] %}
-      <button type="button" data-metric="{{ key }}" class="text-xs font-semibold px-3 py-1.5" style="background:rgba(255,255,255,.06);color:#9fb3d1;">{{ label }}</button>
+    {% set t, vp = channel.totals, channel.vs_prev %}
+    <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+      <div class="text-sm font-semibold text-white">Trends &middot; {{ channel.range.start.strftime('%d %b') }} &ndash; {{ channel.range.end.strftime('%d %b %Y') }} <span class="font-normal" style="color:#7d93b5">({{ channel.range.days }} days)</span></div>
+      <div class="text-[11px]" style="color:#7d93b5">Tick any cards to draw them. % = change vs the {{ channel.range.days }} days before.</div>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 mb-4" role="group" aria-label="Metrics to draw">
+      {% for key, label, val in [
+          ('spend', 'Budget spent', '&#8377;{:,.0f}'.format(t.spend)),
+          ('impressions', 'Impressions', '{:,}'.format(t.impressions)),
+          ('atc', 'Add to carts', '{:,}'.format(t.atc)),
+          ('units', 'Quantity sold', '{:,}'.format(t.units)),
+          ('sales', 'Sales', '&#8377;{:,.0f}'.format(t.sales)),
+          ('roas', 'ROAS', t.roas if t.roas is not none else '-'),
+          ('ctr', 'CTR', ('%.2f%%'|format(t.ctr)) if t.ctr is not none else '-'),
+          ('cpm', 'CPM', ('&#8377;%.0f'|format(t.cpm)) if t.cpm is not none else '-')] %}
+      {% set pct = vp[key] %}
+      {% set good = pct is not none and ((pct > 0) != (key == 'cpm')) %}
+      <label class="metric-card rounded-xl p-3 cursor-pointer block" data-card="{{ key }}" style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1)">
+        <span class="flex items-center justify-between gap-2">
+          <span class="text-[11px] font-semibold" style="color:#9fb3d1">{{ label }}</span>
+          <input type="checkbox" data-metric="{{ key }}" class="w-4 h-4" aria-label="Draw {{ label }}">
+        </span>
+        <span class="block font-display text-lg font-bold text-white mt-1 tabular">{{ val|safe }}</span>
+        <span class="block text-[11px] tabular" style="color: {{ '#7d93b5' if pct is none or key == 'spend' or (pct|abs) < 1 else ('#3ddc6a' if good else '#ff8a80') }}">{{ ('%+.0f%%'|format(pct)) if pct is not none else 'no earlier data' }}</span>
+      </label>
       {% endfor %}
     </div>
     <div style="height:280px"><canvas id="channelChart"></canvas></div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] mt-2" style="color:#9fb3d1">
-      <span>Line = the chosen metric (left axis) &middot; bars = spend (right axis)</span>
+      <span>Each ticked card is one line, on its own scale (the first two show their axis)</span>
       <span>CTR = add to carts &divide; impressions (Blinkit reports no clicks) &middot; CPM = spend per 1,000 impressions</span>
       {% if channel.scope == 'ai' %}<span>Dashed grey = the brand's campaigns the AI does not run, for comparison</span>{% endif %}
       <span>&#9650; = days the AI pushed bid changes (hover for raised / cut / paused)</span>
@@ -463,54 +507,63 @@ const settlingFrom = {{ channel.settling_from | tojson }};
 const rupee = v => '₹' + (v >= 100000 ? (v / 100000).toFixed(1) + 'L' : v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : Math.round(v));
 const num = v => v >= 100000 ? (v / 100000).toFixed(1) + 'L' : v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : Math.round(v);
 const METRICS = {
-  roas:  { label: 'ROAS', get: p => p.spend ? p.sales / p.spend : null, fmt: v => v.toFixed(2), axis: v => v },
-  spend: { label: 'Spend', get: p => p.spend, fmt: rupee, axis: rupee },
-  sales: { label: 'Sales', get: p => p.sales, fmt: rupee, axis: rupee },
-  impressions: { label: 'Impressions', get: p => p.impressions, fmt: num, axis: num },
-  ctr:   { label: 'CTR (ATC / impr.)', get: p => p.impressions ? p.atc / p.impressions * 100 : null, fmt: v => v.toFixed(2) + '%', axis: v => v + '%' },
-  atc:   { label: 'Add to carts', get: p => p.atc, fmt: num, axis: num },
-  cpm:   { label: 'Cost per 1000 impr.', get: p => p.impressions ? p.spend / p.impressions * 1000 : null, fmt: rupee, axis: rupee },
+  spend: { label: 'Budget spent', color: '#a78bfa', get: p => p.spend, fmt: rupee },
+  impressions: { label: 'Impressions', color: '#38bdf8', get: p => p.impressions, fmt: num },
+  atc:   { label: 'Add to carts', color: '#f472b6', get: p => p.atc, fmt: num },
+  units: { label: 'Quantity sold', color: '#fb923c', get: p => p.units, fmt: num },
+  sales: { label: 'Sales', color: '#34d399', get: p => p.sales, fmt: rupee },
+  roas:  { label: 'ROAS', color: '#3987e5', get: p => p.spend ? p.sales / p.spend : null, fmt: v => v.toFixed(2) },
+  ctr:   { label: 'CTR', color: '#facc15', get: p => p.impressions ? p.atc / p.impressions * 100 : null, fmt: v => v.toFixed(2) + '%' },
+  cpm:   { label: 'CPM', color: '#f87171', get: p => p.impressions ? p.spend / p.impressions * 1000 : null, fmt: rupee },
 };
 const round = v => v == null ? null : +v.toFixed(4);
-const others = d => d.others ? d.others : null;
+const settling = { borderDash: ctx => (isDayView && trend[ctx.p1DataIndex] && trend[ctx.p1DataIndex].label >= settlingFrom) ? [5, 4] : undefined };
 
 let chart = null;
-function draw(key) {
-  const m = METRICS[key];
-  const values = trend.map(d => round(m.get(d)));
-  const otherValues = trend.map(d => others(d) ? round(m.get(others(d))) : null);
-  const settling = { borderDash: ctx => (isDayView && trend[ctx.p1DataIndex] && trend[ctx.p1DataIndex].label >= settlingFrom) ? [5, 4] : undefined };
-  const line = (label, data, color, fill) => ({ label, data, yAxisID: 'y', order: 1, borderColor: color, backgroundColor: fill,
-    borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12, tension: .25, fill: true, spanGaps: true, segment: settling });
-  let datasets;
-  // week/month buckets can straddle the cutover, so the before/after colour split is day view only
-  const cutoverIdx = isDayView ? trend.findIndex(d => d.label >= cutoverLabel) : -1;
-  if (cutoverIdx >= 0) {
-    const before = values.map((v, i) => i <= cutoverIdx ? v : null);
-    const after = values.map((v, i) => i >= cutoverIdx ? v : null);
-    const afterLabel = hadDecisions ? (aiScope ? 'After (AI)' : 'After') : 'After (nothing implemented)';
-    datasets = [line('Before', before, '#7d93b5', 'rgba(125,147,181,.12)'),
-                line(afterLabel, after, hadDecisions ? '#3987e5' : '#7d93b5', hadDecisions ? 'rgba(57,135,229,.18)' : 'rgba(125,147,181,.12)')];
-  } else {
-    datasets = [line(m.label, values, '#3987e5', 'rgba(57,135,229,.15)')];
-  }
-  if (aiScope && otherValues.some(v => v != null)) {
-    const ownScale = !['roas', 'ctr', 'cpm'].includes(key);
-    datasets.push({ label: ownScale ? 'Other campaigns (own scale)' : 'Other campaigns', data: otherValues, yAxisID: key === 'roas' || key === 'ctr' || key === 'cpm' ? 'y' : 'y2', order: 2,
-      borderColor: '#9aa3ad', borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3,
-      pointHitRadius: 12, tension: .25, fill: false, spanGaps: true });
-  }
-  const top = Math.max(...values.filter(v => v != null), 0);
+function selected() {
+  return [...document.querySelectorAll('input[data-metric]')].filter(c => c.checked).map(c => c.dataset.metric);
+}
+function draw() {
+  let keys = selected();
+  if (!keys.length) { keys = ['roas']; document.querySelector('input[data-metric="roas"]').checked = true; }
+  const single = keys.length === 1;
+  const datasets = [], scales = {
+    x: { grid: { display: false }, ticks: { color: '#9fb3d1', font: { size: 10 }, maxRotation: 0, autoSkip: true } },
+  };
+  keys.forEach((key, i) => {
+    const m = METRICS[key], axis = 'y_' + key;
+    const values = trend.map(d => round(m.get(d)));
+    const line = (label, data, color, fill) => ({ label, data, yAxisID: axis, order: 1, borderColor: color,
+      backgroundColor: fill, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12,
+      tension: .3, fill: !!fill, spanGaps: true, segment: settling, _metric: key });
+    // one metric on its own: split before/after the cutover (day view) and add the comparison line
+    const cutoverIdx = single && isDayView ? trend.findIndex(d => d.label >= cutoverLabel) : -1;
+    if (cutoverIdx > 0) {
+      datasets.push(line(`${m.label} before`, values.map((v, j) => j <= cutoverIdx ? v : null), '#7d93b5', 'rgba(125,147,181,.12)'));
+      datasets.push(line(`${m.label} after${hadDecisions && aiScope ? ' (AI)' : ''}`, values.map((v, j) => j >= cutoverIdx ? v : null), m.color, m.color + '2e'));
+    } else {
+      datasets.push(line(m.label, values, m.color, single ? m.color + '26' : null));
+    }
+    if (single && aiScope && trend.some(d => d.others)) {
+      const ratio = ['roas', 'ctr', 'cpm'].includes(key);
+      datasets.push({ label: ratio ? 'Other campaigns' : 'Other campaigns (own scale)',
+        data: trend.map(d => d.others ? round(m.get(d.others)) : null), yAxisID: ratio ? axis : 'y_others', order: 2,
+        borderColor: '#9aa3ad', borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3,
+        pointHitRadius: 12, tension: .3, fill: false, spanGaps: true, _metric: key });
+      scales.y_others = { display: false, beginAtZero: true };
+    }
+    scales[axis] = { display: i < 2, position: i === 0 ? 'left' : 'right', beginAtZero: true,
+      grid: { display: i === 0, color: 'rgba(255,255,255,.08)' },
+      ticks: { color: i < 2 ? m.color : '#9fb3d1', font: { size: 10 }, maxTicksLimit: 6, callback: v => m.fmt(v) },
+      title: { display: i < 2, text: m.label, color: m.color, font: { size: 10 } } };
+  });
+  // triangles on the days the AI pushed bid changes, drawn along the top
   if (trend.some(d => d.push_total)) {
-    datasets.push({ type: 'line', label: 'AI bid pushes', yAxisID: 'y', order: 0, showLine: false,
-      data: trend.map(d => d.push_total ? +(top * 1.08).toFixed(4) : null),
-      pointStyle: 'triangle', pointRadius: 5, pointHoverRadius: 7, borderColor: '#f5b94a', backgroundColor: '#f5b94a' });
+    datasets.push({ type: 'line', label: 'AI bid pushes', yAxisID: 'y_push', order: 0, showLine: false,
+      data: trend.map(d => d.push_total ? 1 : null), pointStyle: 'triangle', pointRadius: 5, pointHoverRadius: 7,
+      borderColor: '#f5b94a', backgroundColor: '#f5b94a' });
+    scales.y_push = { display: false, min: 0, max: 1.06 };
   }
-  if (key !== 'spend') {
-    datasets.push({ type: 'bar', label: 'Spend', data: trend.map(d => Math.round(d.spend || 0)), yAxisID: 'y1', order: 3,
-      backgroundColor: 'rgba(159,179,209,.18)', borderRadius: 2, maxBarThickness: 18 });
-  }
-  const spendMax = Math.max(...trend.map(d => d.spend || 0), 1);
   const cfg = {
     type: 'line',
     data: { labels: trend.map(d => d.label), datasets },
@@ -524,41 +577,33 @@ function draw(key) {
           filter: item => item.parsed.y != null,
           callbacks: { label: ctx => {
             const d = trend[ctx.dataIndex];
-            if (ctx.dataset.label === 'Spend') return `Spend: ${rupee(d.spend || 0)}`;
             if (ctx.dataset.label === 'AI bid pushes') return `AI pushed: ${d.pushes.raised} raised, ${d.pushes.cut} cut, ${d.pushes.paused} paused`;
-            return `${ctx.dataset.label}: ${m.fmt(ctx.parsed.y)}`;
+            return `${ctx.dataset.label}: ${METRICS[ctx.dataset._metric].fmt(ctx.parsed.y)}`;
           } },
         },
       },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: '#9fb3d1', font: { size: 10 }, maxRotation: 0, autoSkip: true } },
-        y: { beginAtZero: true, position: 'left', grid: { color: 'rgba(255,255,255,.08)' },
-             ticks: { color: '#9fb3d1', font: { size: 10 }, callback: m.axis },
-             title: { display: true, text: m.label, color: '#7d93b5', font: { size: 10 } } },
-        // spend bars sit in the lower ~40% so the metric line stays readable
-        y1: { display: key !== 'spend', beginAtZero: true, position: 'right', grid: { display: false }, suggestedMax: spendMax * 2.5,
-              ticks: { color: '#7d93b5', font: { size: 10 }, maxTicksLimit: 5, callback: rupee },
-              title: { display: true, text: 'Spend', color: '#7d93b5', font: { size: 10 } } },
-        // other campaigns' totals are on a different scale for spend/sales/impr/ATC
-        y2: { display: false, beginAtZero: true },
-      },
+      scales,
     },
   };
   if (chart) chart.destroy();
   chart = new Chart(document.getElementById('channelChart'), cfg);
-  document.querySelectorAll('[data-metric]').forEach(b => {
-    const on = b.dataset.metric === key;
-    b.style.background = on ? 'var(--brand)' : 'rgba(255,255,255,.06)';
-    b.style.color = on ? '#fff' : '#9fb3d1';
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  document.querySelectorAll('[data-card]').forEach(c => {
+    const on = keys.includes(c.dataset.card), col = METRICS[c.dataset.card].color;
+    c.style.borderColor = on ? col : 'rgba(255,255,255,.1)';
+    c.style.boxShadow = on ? `inset 0 3px 0 ${col}` : 'none';
   });
-  try { localStorage.setItem('perfMetric', key); } catch (e) {}
+  try { localStorage.setItem('perfMetrics', JSON.stringify(keys)); } catch (e) {}
 }
-document.querySelectorAll('[data-metric]').forEach(b => b.addEventListener('click', () => draw(b.dataset.metric)));
-let start = 'roas';
-try { const k = localStorage.getItem('perfMetric'); if (k && METRICS[k]) start = k; } catch (e) {}
-draw(start);
+document.querySelectorAll('input[data-metric]').forEach(c => c.addEventListener('change', draw));
+let saved = ['roas', 'spend'];
+try { const v = JSON.parse(localStorage.getItem('perfMetrics') || 'null'); if (Array.isArray(v) && v.length && v.every(k => METRICS[k])) saved = v; } catch (e) {}
+saved.forEach(k => { const c = document.querySelector(`input[data-metric="${k}"]`); if (c) c.checked = true; });
+draw();
 })();
+function toggleCustom(sel) {
+  const box = document.getElementById('customRange');
+  if (box) box.hidden = sel.value !== 'custom';
+}
 function pickCampaigns(form, mode) {
   form.querySelectorAll('input[name="campaigns"]').forEach(cb => {
     cb.checked = mode === 'all' || (mode === 'auto' && cb.dataset.auto === '1');

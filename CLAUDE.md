@@ -107,9 +107,13 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
 
 ## Ads Performance (`/roas`, was ROAS Impact; 2026-10-14)
 - AI-managed scope has a campaign picker (`?campaigns=` repeated; `queries.pick_campaigns`, default all AI campaigns).
-- Trend: metric switch (ROAS, spend, sales, impressions, CTR = ATC / impressions as the bid engine uses - Blinkit has no
-  clicks, add to carts, CPM), spend bars, dashed line = the brand's non-AI campaigns (`fetch_channel_daily(exclude_ids=)`),
-  triangles = days the AI pushed bids (`fetch_push_counts`). Before/after table for all metrics; 30-day ROAS sparkline per campaign.
+- Laid out like Blinkit's own dashboard: date range (`range` = 7/15/30/90/this_month/last_month/custom + `from`/`to`,
+  `queries.resolve_range`, default last 30 days ending yesterday), metric cards with tick boxes (budget spent, impressions,
+  add to carts, quantity sold, sales, ROAS, CTR, CPM; totals for the range + % vs the previous period of the same length),
+  every ticked card is one line on its own scale. CTR = ATC / impressions, as the bid engine uses (Blinkit has no clicks).
+  One metric alone: before/after split at the cutover + dashed line = the brand's non-AI campaigns
+  (`fetch_channel_daily(exclude_ids=)`). Triangles = days the AI pushed bids (`fetch_push_counts`).
+  Before/after table for all metrics; 30-day ROAS sparkline per campaign.
 
 ## Open items (next session)
 - Chumbak 607168 malformed reply (13-14 Oct, "Recovered N objects", rest backfilled at 0.70 -> REVIEW): fixed

@@ -114,11 +114,41 @@ def test_comparison_carries_other_campaigns_totals():
     out = queries.attach_comparison(queries.bucket_channel_series([day(d1, 100, 400)], "day"),
                                     queries.bucket_channel_series([dict(day(d1, 300, 900), impressions=7, atc=2)], "day"),
                                     [], "day")
-    assert out[0]["others"] == {"spend": 300, "sales": 900, "impressions": 7, "atc": 2}
+    assert out[0]["others"] == {"spend": 300, "sales": 900, "impressions": 7, "atc": 2, "units": None}
 
 
 def test_page_is_called_ads_performance_with_metric_switch(client):
     html = client.get("/roas?brand=Chumbak&scope=ai").get_data(as_text=True)
     assert "<h1" in html and "Ads Performance" in html and "ROAS Impact" not in html
-    for key in ("roas", "spend", "sales", "impressions", "ctr", "atc", "cpm"):
-        assert f'data-metric="{key}"' in html
+    assert 'data-metric="roas"' in html
+
+
+def test_date_range_presets():
+    today = date(2026, 10, 14)
+    assert queries.resolve_range("this_month", None, None, today)[1:] == (date(2026, 10, 1), today)
+    assert queries.resolve_range("last_month", None, None, today)[1:] == (date(2026, 9, 1), date(2026, 9, 30))
+    # last N days ends yesterday (today has almost no data yet)
+    assert queries.resolve_range("15", None, None, today)[1:] == (date(2026, 9, 29), date(2026, 10, 13))
+    assert queries.resolve_range("custom", "2026-10-10", "2026-10-01", today)[1:] == (date(2026, 10, 1), date(2026, 10, 10))
+    assert queries.resolve_range("custom", "bad", None, today)[0] == "30"
+    assert queries.resolve_range(None, None, None, today)[0] == "30"
+
+
+def test_card_totals_and_change_vs_previous_period():
+    d0 = date(2026, 10, 1)
+    rows = [dict(day(d0 + timedelta(days=i), 100, 300 + 100 * (i >= 2)), impressions=1000, atc=10 + 10 * (i >= 2), units=2)
+            for i in range(4)]
+    prev = queries.period_totals(rows, d0, d0 + timedelta(days=1))
+    cur = queries.period_totals(rows, d0 + timedelta(days=2), d0 + timedelta(days=3))
+    assert cur["roas"] == 4.0 and prev["roas"] == 3.0 and cur["units"] == 4 and cur["ctr"] == 2.0
+    ch = queries.compare_totals(cur, prev)
+    assert ch["roas"] == 33.3 and ch["spend"] == 0.0 and ch["atc"] == 100.0
+    assert queries.compare_totals(cur, queries.period_totals([], d0, d0))["roas"] is None
+
+
+def test_metric_cards_with_checkboxes_and_range_picker(client):
+    html = client.get("/roas?brand=Chumbak&scope=ai&range=this_month").get_data(as_text=True)
+    for key in ("spend", "impressions", "atc", "units", "sales", "roas", "ctr", "cpm"):
+        assert f'type="checkbox" data-metric="{key}"' in html
+    assert 'name="range"' in html and 'value="this_month" selected' in html
+    assert "Quantity sold" in html and "Budget spent" in html

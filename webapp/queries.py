@@ -569,6 +569,7 @@ def fetch_channel_daily(brand, days=180, campaign_ids=None, exclude_ids=None):
                 SUM("Direct Sales" + "Indirect Sales")            AS sales,
                 SUM("Impressions")                                AS impressions,
                 SUM("Direct ATC" + "Indirect ATC")                AS atc,
+                SUM("Direct Quantities Sold" + "Indirect Quantities Sold") AS units,
                 SUM("New Users Acquired")                         AS new_users,
                 AVG("Most Viewed Position")                       AS avg_position
             FROM voylla."Blinkit_Ads_Report"
@@ -593,6 +594,7 @@ def fetch_channel_daily(brand, days=180, campaign_ids=None, exclude_ids=None):
             "roas": round(sales / spend, 2) if spend else None,
             "impressions": int(r["impressions"] or 0),
             "atc": int(r["atc"] or 0),
+            "units": int(r["units"] or 0),
             "new_users": int(r["new_users"] or 0),
             "avg_position": round(float(r["avg_position"]), 1) if r["avg_position"] is not None else None,
         })
@@ -759,6 +761,53 @@ def fetch_campaign_roas_daily(brand, campaign_ids, days=30):
     return {cid: [vals.get(d) for d in days_list] for cid, vals in by_cid.items()}
 
 
+RANGE_PRESETS = {"7": "Last 7 days", "15": "Last 15 days", "30": "Last 30 days", "90": "Last 90 days",
+                 "this_month": "This month", "last_month": "Last month", "custom": "Custom"}
+
+
+def resolve_range(preset, start_arg, end_arg, today):
+    """(preset, start, end) for the trend's date range, inclusive. Unknown or
+    incomplete input falls back to the last 30 days."""
+    yesterday = today - timedelta(days=1)
+    if preset == "custom":
+        try:
+            start, end = date.fromisoformat(start_arg), date.fromisoformat(end_arg)
+            if start > end:
+                start, end = end, start
+            return "custom", start, min(end, today)
+        except (TypeError, ValueError):
+            preset = "30"
+    if preset == "this_month":
+        return preset, today.replace(day=1), today
+    if preset == "last_month":
+        end = today.replace(day=1) - timedelta(days=1)
+        return preset, end.replace(day=1), end
+    if preset not in ("7", "15", "30", "90"):
+        preset = "30"
+    return preset, yesterday - timedelta(days=int(preset) - 1), yesterday
+
+
+def period_totals(daily, start, end):
+    """Totals for start..end (inclusive) of fetch_channel_daily rows, with the
+    ratios recomputed from the totals (never averaged)."""
+    rows = [d for d in daily if start <= d["date"] <= end]
+    t = {k: sum(r.get(k) or 0 for r in rows) for k in ("spend", "sales", "impressions", "atc", "units")}
+    t["roas"] = round(t["sales"] / t["spend"], 2) if t["spend"] else None
+    t["ctr"] = round(t["atc"] / t["impressions"] * 100, 2) if t["impressions"] else None
+    t["cpm"] = round(t["spend"] / t["impressions"] * 1000, 2) if t["impressions"] else None
+    t["days"] = len(rows)
+    return t
+
+
+def compare_totals(cur, prev):
+    """% change per metric vs the previous period; None when there is no base."""
+    out = {}
+    for k in ("spend", "sales", "impressions", "atc", "units", "roas", "ctr", "cpm"):
+        a, b = cur.get(k), prev.get(k)
+        out[k] = round((a / b - 1) * 100, 1) if (a is not None and b) else None
+    return out
+
+
 def bucket_label(d, granularity):
     if granularity == "week":
         iso = d.isocalendar()
@@ -780,7 +829,7 @@ def attach_comparison(trend, others_trend, push_counts, granularity):
     for t in trend:
         o = others.get(t["label"])
         t["others_roas"] = o.get("roas") if o else None
-        t["others"] = ({k: o.get(k) for k in ("spend", "sales", "impressions", "atc")} if o else None)
+        t["others"] = ({k: o.get(k) for k in ("spend", "sales", "impressions", "atc", "units")} if o else None)
         t["pushes"] = pushes.get(t["label"], {"raised": 0, "cut": 0, "paused": 0})
         t["push_total"] = sum(t["pushes"].values())
     return trend
@@ -817,7 +866,7 @@ def bucket_channel_series(daily, granularity="day"):
         if key not in buckets:
             buckets[key] = {
                 "label": key, "spend": 0.0, "sales": 0.0, "impressions": 0,
-                "atc": 0, "new_users": 0, "_pos_sum": 0.0, "_pos_n": 0,
+                "atc": 0, "units": 0, "new_users": 0, "_pos_sum": 0.0, "_pos_n": 0,
             }
             order.append(key)
         b = buckets[key]
@@ -825,6 +874,7 @@ def bucket_channel_series(daily, granularity="day"):
         b["sales"] += d["sales"]
         b["impressions"] += d["impressions"]
         b["atc"] += d["atc"]
+        b["units"] += d.get("units", 0)
         b["new_users"] += d["new_users"]
         if d["avg_position"] is not None:
             b["_pos_sum"] += d["avg_position"]
