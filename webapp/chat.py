@@ -60,7 +60,7 @@ user names one explicitly.
 flag numbers from the last 2 days as provisional if it's relevant to the question.
 - get_pending_actions_summary and get_ondemand_suggestions read the SAME table \
 (voylla.blinkit_ondemand_actions) - Blinkit_actions_llm, the old scheduled-batch table, has been \
-fully retired from every surface of this dashboard (Pending Actions, ROAS Impact, Before/After all \
+fully retired from every surface of this dashboard (Pending Actions, Ads Performance (formerly ROAS Impact), Before/After all \
 switched over). Every campaign, across all three brands, is on-demand-managed. \
 get_pending_actions_summary defaults to recent history across all campaigns; get_ondemand_suggestions \
 is the same data with a campaign-name search filter. Use whichever the question's phrasing suggests, \
@@ -70,7 +70,7 @@ generates a suggestion, auto-accepts it (skipping only rows flagged REVIEW), and
 script sends it to Blinkit live - within an authorized per-move CPM tolerance (bid_tolerance_pct, \
 e.g. 20%). "semi_auto" (the default) means suggestions still need a human accept/override on the \
 On-Demand AI or Pending Actions page. Use get_automation_status to check a campaign's mode.
-- ROAS Impact and Before/After now score against voylla.blinkit_ondemand_actions, not the old table. \
+- Ads Performance (formerly ROAS Impact) and Before/After now score against voylla.blinkit_ondemand_actions, not the old table. \
 Their "was_implemented"/verdict logic requires an actual live push (push_status = 'done' from the \
 independent Blinkit_Ondemand_Bid_Push.ipynb), which stays in DRY_RUN until a human turns it off - so \
 until then, expect verdicts to be empty/NULL for everything. That's correct, not a bug: nothing has \

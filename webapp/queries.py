@@ -542,7 +542,7 @@ def set_ondemand_managed(campaign_id, brand, managed, bid_tolerance_pct=20, set_
         )
 
 
-def fetch_channel_daily(brand, days=180, campaign_ids=None):
+def fetch_channel_daily(brand, days=180, campaign_ids=None, exclude_ids=None):
     """Whole-channel (or campaign-scoped) daily performance straight from
     Blinkit_Ads_Report, independent of any individual AI recommendation -
     this is the actual portfolio ROAS. Also pulls ATC and New Users Acquired
@@ -555,6 +555,10 @@ def fetch_channel_daily(brand, days=180, campaign_ids=None):
     if campaign_ids:
         campaign_filter = 'AND "Campaign ID" = ANY(%(campaign_ids)s)'
         params["campaign_ids"] = campaign_ids
+    if exclude_ids:
+        # the brand's other campaigns: the comparison line for the AI's ones
+        campaign_filter += ' AND NOT ("Campaign ID" = ANY(%(exclude_ids)s))'
+        params["exclude_ids"] = exclude_ids
 
     with get_cursor() as cur:
         cur.execute(
@@ -668,6 +672,132 @@ def fetch_campaign_scoreboard(brand, campaign_ids, cutover_date, window_days=7):
     return out
 
 
+def fetch_ai_campaign_options(brand, campaign_ids):
+    """Name, Auto mode and Blinkit status for each AI-managed campaign - the
+    list the ROAS Impact campaign picker shows. Auto campaigns first."""
+    if not campaign_ids:
+        return []
+    ids = [str(i) for i in campaign_ids]
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            WITH n AS (
+                SELECT DISTINCT ON (campaign_id::text) campaign_id::text AS cid, campaign_name, last_status
+                FROM voylla."Blinkit_Campaign_Runtime"
+                WHERE brand = %(brand)s AND campaign_id::text = ANY(%(ids)s)
+                ORDER BY campaign_id::text, log_date DESC
+            ),
+            m AS (SELECT campaign_id::text AS cid, mode FROM voylla.campaign_autonomy_mode
+                  WHERE brand = %(brand)s AND campaign_id::text = ANY(%(ids)s))
+            SELECT i.cid, n.campaign_name, n.last_status, m.mode
+            FROM UNNEST(%(ids)s::text[]) AS i(cid)
+            LEFT JOIN n USING (cid) LEFT JOIN m USING (cid)
+            """,
+            {"brand": brand, "ids": ids},
+        )
+        rows = cur.fetchall()
+    out = [{"cid": r["cid"], "name": r["campaign_name"] or r["cid"], "status": r["last_status"],
+            "auto": r["mode"] == "auto"} for r in rows]
+    return sorted(out, key=lambda c: (not c["auto"], str(c["name"]).lower()))
+
+
+def pick_campaigns(arg, ai_ids):
+    """The campaigns ticked in the picker (`campaigns=1,2,3`), limited to the
+    AI-managed ones. Nothing valid ticked = all of them."""
+    allowed = {int(i) for i in ai_ids}
+    chosen = {int(p) for p in str(arg or "").split(",") if p.strip().isdigit() and int(p) in allowed}
+    return sorted(chosen or allowed)
+
+
+def fetch_push_counts(brand, campaign_ids, start):
+    """Bid changes the AI actually pushed to Blinkit, per day, for the chosen
+    campaigns: the markers on the ROAS trend."""
+    if not campaign_ids:
+        return []
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT action_date::date AS d,
+                   COUNT(*) FILTER (WHERE action = 'INCREASE_CPM') AS raised,
+                   COUNT(*) FILTER (WHERE action = 'DECREASE_CPM') AS cut,
+                   COUNT(*) FILTER (WHERE action = 'PAUSE') AS paused
+            FROM voylla.blinkit_ondemand_actions
+            WHERE "Brand" = %(brand)s AND push_status = 'done'
+              AND campaign_id = ANY(%(ids)s) AND action_date::date >= %(start)s
+            GROUP BY 1 ORDER BY 1
+            """,
+            {"brand": brand, "ids": [str(i) for i in campaign_ids], "start": start},
+        )
+        return [{"date": r["d"], "raised": int(r["raised"]), "cut": int(r["cut"]), "paused": int(r["paused"])}
+                for r in cur.fetchall()]
+
+
+def fetch_campaign_roas_daily(brand, campaign_ids, days=30):
+    """campaign id -> [roas per day] for the last `days` days (None = no spend),
+    for the sparkline next to each campaign in the scoreboard."""
+    if not campaign_ids:
+        return {}
+    start = date.today() - timedelta(days=days)
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT "Campaign ID"::text AS cid, TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date AS d,
+                   SUM("Estimated Budget Consumed") AS spend, SUM("Direct Sales" + "Indirect Sales") AS sales
+            FROM voylla."Blinkit_Ads_Report"
+            WHERE "Brand" = %(brand)s AND "Campaign ID"::text = ANY(%(ids)s)
+              AND TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date >= %(start)s
+            GROUP BY 1, 2
+            """,
+            {"brand": brand, "ids": [str(i) for i in campaign_ids], "start": start},
+        )
+        rows = cur.fetchall()
+    by_cid = {}
+    for r in rows:
+        spend = float(r["spend"] or 0)
+        by_cid.setdefault(r["cid"], {})[r["d"]] = round(float(r["sales"] or 0) / spend, 2) if spend else None
+    days_list = [start + timedelta(days=i) for i in range(days)]
+    return {cid: [vals.get(d) for d in days_list] for cid, vals in by_cid.items()}
+
+
+def bucket_label(d, granularity):
+    if granularity == "week":
+        iso = d.isocalendar()
+        return f"{iso[0]}-W{iso[1]:02d}"
+    if granularity == "month":
+        return d.strftime("%Y-%m")
+    return str(d)
+
+
+def attach_comparison(trend, others_trend, push_counts, granularity):
+    """Adds to each trend point the other campaigns' ROAS for the same day /
+    week / month and the AI bid pushes that landed in it."""
+    others = {o["label"]: o for o in others_trend}
+    pushes = {}
+    for p in push_counts:
+        b = pushes.setdefault(bucket_label(p["date"], granularity), {"raised": 0, "cut": 0, "paused": 0})
+        for k in ("raised", "cut", "paused"):
+            b[k] += p[k]
+    for t in trend:
+        o = others.get(t["label"])
+        t["others_roas"] = o.get("roas") if o else None
+        t["others"] = ({k: o.get(k) for k in ("spend", "sales", "impressions", "atc")} if o else None)
+        t["pushes"] = pushes.get(t["label"], {"raised": 0, "cut": 0, "paused": 0})
+        t["push_total"] = sum(t["pushes"].values())
+    return trend
+
+
+def sparkline_points(values, width=96, height=24, pad=2):
+    """SVG polyline points for a small ROAS sparkline; days with no spend are
+    skipped. "" when there are fewer than two points to draw."""
+    pts = [(i, v) for i, v in enumerate(values or []) if v is not None]
+    if len(pts) < 2:
+        return ""
+    lo, hi = min(v for _, v in pts), max(v for _, v in pts)
+    span = (hi - lo) or 1.0
+    step = (width - 2 * pad) / (len(values) - 1)
+    return " ".join(f"{pad + i * step:.1f},{pad + (height - 2 * pad) * (1 - (v - lo) / span):.1f}" for i, v in pts)
+
+
 def bucket_channel_series(daily, granularity="day"):
     """Aggregates fetch_channel_daily's rows into week or month buckets -
     ROAS is always recomputed from summed spend/sales (spend-weighted), never
@@ -722,6 +852,7 @@ def channel_before_after(daily, cutover_date, window_days=7):
     def agg(rows):
         spend = sum(r["spend"] for r in rows)
         sales = sum(r["sales"] for r in rows)
+        impressions = sum(r.get("impressions") or 0 for r in rows)
         return {
             "spend": round(spend, 2),
             "sales": round(sales, 2),
@@ -729,6 +860,10 @@ def channel_before_after(daily, cutover_date, window_days=7):
             "days": len(rows),
             "atc": sum(r["atc"] for r in rows),
             "new_users": sum(r["new_users"] for r in rows),
+            "impressions": impressions,
+            # CTR = add to carts / impressions (Blinkit reports no clicks), as the bid engine uses
+            "ctr": round(sum(r["atc"] for r in rows) / impressions * 100, 2) if impressions else None,
+            "cpm": round(spend / impressions * 1000, 2) if impressions else None,
         }
 
     b, a = agg(before), agg(after)
