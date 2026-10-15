@@ -115,6 +115,18 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
   (`fetch_channel_daily(exclude_ids=)`). Triangles = days the AI pushed bids (`fetch_push_counts`).
   Before/after table for all metrics; 30-day ROAS sparkline per campaign.
 
+## Performance alerts (`webapp/perf_alerts.py`, added 2026-10-15)
+- Server cron 1:15 pm IST (`45 7 * * *` UTC), after the 12:30 Auto run. Flags campaigns NOT on Auto, not STOPPED,
+  with >= Rs 2,000 spend in the last 7 days and ROAS < 60% of their brand's ROAS over the same days.
+- Worst 15 a day across all brands (by sales missed vs brand ROAS) get `claude-sonnet-5-5` suggestions with
+  `requested_by='perf_alert'`, saved PENDING. It never accepts, pushes or changes a mode (a test checks this).
+- Unanswered suggestions: no new AI call; reminder in the email from day 2; regenerated after 7 days.
+  Answered within 3 days: not asked again. Log table `voylla.blinkit_perf_alert_log` (one row per day x campaign).
+- Email to `ALERT_TO` (default amit.singh@voylla.com) via Gmail SMTP; creds from env `ALERT_EMAIL`,
+  `ALERT_EMAIL_PASSWORD`, `ALERT_SENDER_NAME` on the server, else the PC's `Automationalert_emailid_pass.txt`.
+  Subject contains "failed" on purpose: Amit's Gmail filter archives automation mail without error/failed words.
+- Report-only check (no AI, no mail, no writes): `perf_alerts.run(send=False, generate=False, log=False)`.
+
 ## Open items (next session)
 - Chumbak 607168 malformed reply (13-14 Oct, "Recovered N objects", rest backfilled at 0.70 -> REVIEW): fixed
   2026-10-14 in `generate_ondemand_suggestions` - Sonnet 5.5 thinks by default and thinking counts against

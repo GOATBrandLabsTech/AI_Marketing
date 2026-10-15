@@ -7,6 +7,7 @@ alert mailbox.
 | Time (IST) | Where | What runs |
 |---|---|---|
 | 12:30 pm | Lightsail server, ubuntu crontab (`0 7 * * *` UTC) | `oe.run_auto_campaigns()` in `/home/ubuntu/blinkit-marketing-repo/webapp` - the AI decides every keyword's bid for every campaign set to Auto. Log: `/home/ubuntu/ondemand-daily.log` |
+| 1:15 pm | Lightsail server, ubuntu crontab (`45 7 * * *` UTC) | `perf_alerts.run()` in `/home/ubuntu/blinkit-marketing-repo/webapp` - flags non-Auto campaigns doing badly, asks the AI for pending suggestions, emails Amit (reminder when not accepted in 2 days). Log: `/home/ubuntu/perf-alerts.log` |
 | 2:00 pm | Office PC, Task Scheduler `Blinkit_Ondemand_Bid_Push` | `Blinkit_Ondemand_Bid_Push.ipynb` - accepted changes are sent to Blinkit |
 
 The server copy is the deploy checkout, so it is always on the latest tested
