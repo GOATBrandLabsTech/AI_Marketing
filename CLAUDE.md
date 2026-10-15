@@ -86,6 +86,12 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
 - Portal `PAGES` (dsr-portal, hand-edited by Amit 2026-10-13, backup `index.js.bak-20261013`) now lists
   `skuhealth` (/sku-health, needsAllBrands); it also lists `autotracker` (/auto-tracker), a page removed on 2026-10-14:
   delete that entry. An update by Amal may overwrite the file.
+- Server `webapp/.env.production` (owned by root: edit with `sudo nano`) is SOURCED by the cron lines
+  (`set -a && . ./.env.production`), so it is run as shell: values with spaces must be quoted, no space after `=`,
+  and never paste commands into it. Until 2026-10-15 it held a pasted, unterminated `sudo tee
+  /etc/systemd/system/blinkit-marketing.service <<'EOF'` block that rewrote the service file on every cron run;
+  removed (backup `.env.production.bak-20261015`). It now also has `ALERT_EMAIL`, `ALERT_EMAIL_PASSWORD`,
+  `ALERT_SENDER_NAME` for perf alerts. Second cron line: `45 7 * * *` -> `perf_alerts.run()` >> `/home/ubuntu/perf-alerts.log`.
 - Deploy log on server: `/home/ubuntu/ai-marketing-deploys.log`. Dashboard = systemd `blinkit-marketing` (gunicorn 127.0.0.1:3002).
 
 ## Session log 2026-10-13 / 14
