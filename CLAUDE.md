@@ -84,8 +84,8 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
   `0 7 * * * cd /home/ubuntu/blinkit-marketing-repo/webapp && set -a && . ./.env.production && set +a &&
   /home/ubuntu/blinkitwebvenv/bin/python -c "import ondemand_engine as oe; print(oe.run_auto_campaigns())" >> /home/ubuntu/ondemand-daily.log 2>&1`
 - Portal `PAGES` (dsr-portal, hand-edited by Amit 2026-10-13, backup `index.js.bak-20261013`) now lists
-  `skuhealth` (/sku-health, needsAllBrands); it also lists `autotracker` (/auto-tracker), a page removed on 2026-10-14:
-  delete that entry. An update by Amal may overwrite the file.
+  `skuhealth` (/sku-health, needsAllBrands). The `autotracker` entry was removed again on 2026-10-15 (backup
+  `index.js.bak-20261015`) after the page was dropped. An update by Amal may overwrite the file.
 - Deploy log on server: `/home/ubuntu/ai-marketing-deploys.log`. Dashboard = systemd `blinkit-marketing` (gunicorn 127.0.0.1:3002).
 
 ## Session log 2026-10-13 / 14
