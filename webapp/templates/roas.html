@@ -244,23 +244,23 @@
       <div class="text-sm font-semibold text-white">Campaign by campaign</div>
       <div class="text-[11px]" style="color:#7d93b5">{{ channel.window_days }} days before {{ channel.cutover_date }} vs from it on &middot; bids = changes the AI pushed in that time (&uarr; raised, &darr; cut, &times; paused)</div>
     </div>
-    <table class="w-full text-xs tabular" style="color:#c7d5ea">
+    <table id="scoreTable" class="w-full text-xs tabular" style="color:#c7d5ea">
       <thead>
         <tr style="color:#7d93b5">
-          <th class="text-left font-semibold px-4 py-2">Campaign</th>
+          <th class="text-left font-semibold px-4 py-2" data-sortable>Campaign</th>
           <th class="text-left font-semibold px-2 py-2">ROAS, last 30 days</th>
-          <th class="text-left font-semibold px-2 py-2">Bids</th>
-          <th class="text-right font-semibold px-2 py-2">Spend before</th>
-          <th class="text-right font-semibold px-2 py-2">ROAS before</th>
-          <th class="text-right font-semibold px-2 py-2">Spend after</th>
-          <th class="text-right font-semibold px-2 py-2">ROAS after</th>
-          <th class="text-right font-semibold px-4 py-2">Change</th>
+          <th class="text-left font-semibold px-2 py-2" data-sortable>Bids</th>
+          <th class="text-right font-semibold px-2 py-2" data-sortable>Spend before</th>
+          <th class="text-right font-semibold px-2 py-2" data-sortable>ROAS before</th>
+          <th class="text-right font-semibold px-2 py-2" data-sortable>Spend after</th>
+          <th class="text-right font-semibold px-2 py-2" data-sortable>ROAS after</th>
+          <th class="text-right font-semibold px-4 py-2" data-sortable>Change</th>
         </tr>
       </thead>
       <tbody>
         {% for c in channel.scoreboard %}
         <tr style="border-top:1px solid rgba(255,255,255,.07)">
-          <td class="px-4 py-2">
+          <td class="px-4 py-2" data-sort="{{ c.name }}">
             <div class="text-white font-medium">{{ c.name }}</div>
             <div style="color:#7d93b5">{{ c.cid }}{% if c.mode == 'auto' %} &middot; <span style="color:#8fd3a8">Auto</span>{% endif %}</div>
           </td>
@@ -268,15 +268,15 @@
             {% if c.spark %}<svg width="96" height="24" viewBox="0 0 96 24" aria-label="ROAS trend, last 30 days"><polyline points="{{ c.spark }}" fill="none" stroke="#3987e5" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>
             {% else %}<span style="color:#7d93b5">-</span>{% endif %}
           </td>
-          <td class="px-2 py-2 whitespace-nowrap">
+          <td class="px-2 py-2 whitespace-nowrap" data-sort="{{ (c.raised or 0) + (c.cut or 0) + (c.paused or 0) }}">
             {% if c.raised %}{{ c.raised }}&uarr; {% endif %}{% if c.cut %}{{ c.cut }}&darr; {% endif %}{% if c.paused %}{{ c.paused }}&times;{% endif %}
             {% if not (c.raised or c.cut or c.paused) %}<span style="color:#7d93b5">none</span>{% endif %}
           </td>
-          <td class="px-2 py-2 text-right">&#8377;{{ '{:,.0f}'.format(c.spend_before) }}</td>
-          <td class="px-2 py-2 text-right">{{ c.roas_before if c.roas_before is not none else '-' }}</td>
-          <td class="px-2 py-2 text-right">&#8377;{{ '{:,.0f}'.format(c.spend_after) }}</td>
-          <td class="px-2 py-2 text-right">{{ c.roas_after if c.roas_after is not none else '-' }}</td>
-          <td class="px-4 py-2 text-right font-semibold" style="color: {{ '#3ddc6a' if c.change_pct and c.change_pct > 0 else '#ff8a80' if c.change_pct and c.change_pct < 0 else '#9fb3d1' }}">
+          <td class="px-2 py-2 text-right" data-sort="{{ c.spend_before }}">&#8377;{{ '{:,.0f}'.format(c.spend_before) }}</td>
+          <td class="px-2 py-2 text-right" data-sort="{{ c.roas_before if c.roas_before is not none else -999999 }}">{{ c.roas_before if c.roas_before is not none else '-' }}</td>
+          <td class="px-2 py-2 text-right" data-sort="{{ c.spend_after }}">&#8377;{{ '{:,.0f}'.format(c.spend_after) }}</td>
+          <td class="px-2 py-2 text-right" data-sort="{{ c.roas_after if c.roas_after is not none else -999999 }}">{{ c.roas_after if c.roas_after is not none else '-' }}</td>
+          <td class="px-4 py-2 text-right font-semibold" data-sort="{{ c.change_pct if c.change_pct is not none else -999999 }}" style="color: {{ '#3ddc6a' if c.change_pct and c.change_pct > 0 else '#ff8a80' if c.change_pct and c.change_pct < 0 else '#9fb3d1' }}">
             {{ ('%+d%%'|format(c.change_pct)) if c.change_pct is not none else '-' }}
           </td>
         </tr>
@@ -488,7 +488,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script>initSortableTable('roasTable');</script>
+<script>initSortableTable('roasTable'); initSortableTable('scoreTable');</script>
 {% if daily_series or channel %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 {% endif %}
