@@ -587,6 +587,12 @@ def sku_health():
     stock, price, offer, profit and campaign data, and what is wrong with it."""
     import sku_intel
     from db import get_engine
+    brand = request.args.get("brand")
+    if brand and brand != sku_intel.BRAND:
+        # SKU data is Voylla only for now; showing it under another brand's
+        # heading (the portal lists this page per brand) would be wrong data.
+        return render_template("sku_health_other_brand.html", other=brand, only=sku_intel.BRAND,
+                               active="sku_health")
     flag = request.args.get("flag") or None
     search = (request.args.get("q") or "").strip()
     rows = sku_intel.sku_snapshot(get_engine())
@@ -612,7 +618,12 @@ def sku_health():
 def sku_detail(sku):
     """One SKU: the five department reports and the boss's recommendation for a goal."""
     import sku_agents
+    import sku_intel
     from db import get_engine
+    brand = request.args.get("brand")
+    if brand and brand != sku_intel.BRAND:
+        return render_template("sku_health_other_brand.html", other=brand, only=sku_intel.BRAND,
+                               active="sku_health")
     found = sku_agents.sku_reports(get_engine(), sku)
     if "row" not in found:
         return redirect(url_for("sku_health", q=sku))

@@ -67,3 +67,10 @@ def test_sku_detail_page_shows_five_reports(client):
     for dept in ("Sales", "Inventory", "Price &amp; Offer", "Marketing", "Product"):
         assert dept in html
     assert "Ask the boss" in html
+
+
+def test_other_brand_gets_a_note_not_voylla_skus(client):
+    html = client.get("/sku-health?brand=Chumbak").get_data(as_text=True)
+    assert "covers Voylla only" in html and "Test jhumka" not in html
+    assert "Test jhumka" in client.get("/sku-health?brand=Voylla").get_data(as_text=True)
+    assert "covers Voylla only" in client.get("/sku-health/sku/VJ1?brand=Petcrux").get_data(as_text=True)

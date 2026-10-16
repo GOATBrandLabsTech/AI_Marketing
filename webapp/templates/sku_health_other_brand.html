@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}SKU Health - Marketing Control{% endblock %}
+{% block content %}
+<h1 class="page-title text-2xl font-bold text-ink mb-4">SKU Health &middot; {{ other }}</h1>
+<div class="card p-8 max-w-2xl">
+  <div class="text-base font-semibold mb-2">SKU Health covers {{ only }} only for now.</div>
+  <p class="text-sm" style="color:var(--ink-2)">
+    The SKU data (sales, stock, prices, offers) is mapped for {{ only }} so far, so there is nothing to show for {{ other }} yet.
+    Open SKU Health under {{ only }} to see it.
+  </p>
+</div>
+{% endblock %}

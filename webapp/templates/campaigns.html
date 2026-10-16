@@ -87,7 +87,7 @@
           <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.next_start or '-' }}</td>
           <td class="px-4 py-2.5 whitespace-nowrap" style="color:var(--ink-2)">{{ r.last_end or '-' }}</td>
           <td class="px-4 py-2.5 text-right">
-            <button onclick="openSchedule('{{ r.campaign_id }}','{{ r.campaign_name|e }}','{{ r.brand }}')"
+            <button onclick='openSchedule({{ r.campaign_id|string|tojson }}, {{ r.campaign_name|tojson }}, {{ r.brand|tojson }})'
                     class="text-xs font-semibold px-2.5 py-1 rounded-lg transition" style="color:var(--brand)"
                     onmouseover="this.style.background='var(--brand-50)'" onmouseout="this.style.background='transparent'">Manage</button>
           </td>
