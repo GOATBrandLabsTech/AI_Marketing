@@ -723,7 +723,17 @@ def api_schedule_list(campaign_id):
         d["start_hour"] = st.hour if st else 0
         d["end_hour"] = 24 if (et and et.hour == 23 and et.minute == 59) else (et.hour if et else 0)
         out.append(d)
-    return jsonify({"entries": out})
+    return jsonify({"entries": out, "pause_on_gap": queries.campaign_pauses_on_gap(entries)})
+
+
+@app.route("/api/schedule/<campaign_id>/pause_on_gap", methods=["POST"])
+@login_required
+def api_schedule_pause_on_gap(campaign_id):
+    payload = request.get_json(force=True) or {}
+    if not isinstance(payload.get("value"), bool):
+        return jsonify({"error": "value must be true or false"}), 400
+    n = queries.set_pause_on_gap(campaign_id, payload["value"])
+    return jsonify({"ok": True, "windows": n})
 
 
 @app.route("/api/schedule/<campaign_id>/add", methods=["POST"])
