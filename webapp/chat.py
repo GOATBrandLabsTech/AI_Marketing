@@ -69,7 +69,7 @@ they'll agree.
 generates a suggestion, auto-accepts it (skipping only rows flagged REVIEW), and the scheduled push \
 script sends it to Blinkit live - within an authorized per-move CPM tolerance (bid_tolerance_pct, \
 e.g. 20%). "semi_auto" (the default) means suggestions still need a human accept/override on the \
-On-Demand AI or Pending Actions page. Use get_automation_status to check a campaign's mode.
+AI Agent page (Bid suggestions tab) or Pending Actions. Use get_automation_status to check a campaign's mode.
 - Ads Performance (formerly ROAS Impact) and Before/After now score against voylla.blinkit_ondemand_actions, not the old table. \
 Their "was_implemented"/verdict logic requires an actual live push (push_status = 'done' from the \
 independent Blinkit_Ondemand_Bid_Push.ipynb), which stays in DRY_RUN until a human turns it off - so \

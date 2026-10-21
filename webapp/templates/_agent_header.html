@@ -1,0 +1,49 @@
+{# AI Agent page header: one place for bid suggestions, new keywords and chat.
+   Needs: agent_tab ('bids' | 'keywords' | 'chat'), brand, show_chat; channel/channels on the bids tab. #}
+{% set agent_tabs = [
+  ('bids', 'Bid suggestions', url_for('ondemand', brand=brand, channel=channel or 'Blinkit'),
+   'M3 3v16a2 2 0 002 2h16M7 14l4-4 3 3 5-6'),
+  ('keywords', 'New keywords', url_for('ondemand', brand=brand, view='keywords'),
+   'M12 4v16m8-8H4'),
+] + ([('chat', 'Chat', url_for('chat_page', brand=brand),
+   'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8-1.06 0-2.078-.163-3.024-.464L3 21l1.5-4.5C3.55 15.163 3 13.62 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z')] if show_chat else []) %}
+{% set agent_blurb = {
+  'bids': 'The AI re-checks every keyword bid of a campaign: raise, cut, hold or remove, with its reasons. Auto campaigns run on their own every day at 12:30; everything else waits here for your accept, and the 2 pm push sends it to Blinkit.',
+  'keywords': 'Searches that are growing and that no campaign targets yet, checked by the AI for fit. Nothing is added until you accept it; the 2 pm push adds it at the bid you set.',
+  'chat': 'Ask in plain words about performance, sales, stock, past AI decisions or a SKU. Read-only: it can explain and recommend, never change a bid.',
+} %}
+<div class="mb-6">
+  <div class="flex items-end justify-between flex-wrap gap-4 mb-4">
+    <div>
+      <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.14em] mb-1" style="color:var(--brand)">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        AI Agent
+      </div>
+      <h1 class="page-title text-2xl font-bold text-ink">{{ brand }}</h1>
+      <p class="text-sm mt-1 max-w-3xl" style="color:var(--ink-2)">{{ agent_blurb[agent_tab] }}</p>
+    </div>
+    {% if agent_tab == 'bids' and channels %}
+    <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)" aria-label="Channel">
+      {% for ch in channels %}
+      <a href="{{ url_for('ondemand', brand=brand, channel=ch) }}" data-soft
+         class="text-xs font-semibold px-3.5 py-2 transition"
+         style="{{ 'background:var(--brand);color:#fff;' if ch == channel else 'color:var(--ink-2);' }}">{{ ch }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  <nav class="flex gap-1 border-b" style="border-color:var(--grid)" aria-label="AI Agent sections">
+    {% for key, label, href, icon in agent_tabs %}
+    {% set on = key == agent_tab %}
+    <a href="{{ href }}" data-soft {% if on %}aria-current="page"{% endif %}
+       class="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition"
+       style="margin-bottom:-1px;border-bottom:2px solid {{ 'var(--brand)' if on else 'transparent' }};color:{{ 'var(--ink)' if on else 'var(--ink-muted)' }}">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="{{ icon }}"/></svg>
+      {{ label }}
+      {% if tab_counts and tab_counts.get(key) %}
+      <span class="text-[11px] font-bold rounded-full px-2 py-0.5" style="background:{{ 'var(--brand)' if on else 'var(--plane)' }};color:{{ '#fff' if on else 'var(--ink-2)' }}">{{ tab_counts[key] }}</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </nav>
+</div>

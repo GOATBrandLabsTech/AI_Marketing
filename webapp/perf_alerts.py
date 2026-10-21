@@ -205,7 +205,7 @@ def build_email(report, today, keyword_ideas_waiting=0):
     parts = [f"<p style='font:14px Arial'>Campaigns not on Auto whose ROAS over the last {WINDOW_DAYS} days "
              f"({report[0]['start']:%d %b} &ndash; {report[0]['end']:%d %b}) is below {int(ROAS_RATIO * 100)}% of "
              f"their brand's ROAS, with at least {_inr(MIN_SPEND)} spent. The AI's bid suggestions are saved as "
-             f"<b>pending</b>: nothing reaches Blinkit until you accept them (On-Demand AI page), and the 2 pm push "
+             f"<b>pending</b>: nothing reaches Blinkit until you accept them (AI Agent → Bid suggestions), and the 2 pm push "
              f"then sends them. Suggestions not accepted within {REFRESH_AFTER_DAYS} days are replaced with fresh ones.</p>"]
     if reminders:
         parts.append("<h3 style='font:bold 15px Arial'>Still not accepted</h3>" + table(reminders))
@@ -215,7 +215,7 @@ def build_email(report, today, keyword_ideas_waiting=0):
                      + table(others))
     if keyword_ideas_waiting:
         parts.append(f"<p style='font:14px Arial'><b>{keyword_ideas_waiting} new keyword idea(s)</b> are waiting for "
-                     "you on On-Demand AI &rarr; New keywords (untargeted searches that are growing).</p>")
+                     "you on AI Agent &rarr; New keywords (untargeted searches that are growing).</p>")
     parts.append(f"<p style='font:13px Arial'>Open the dashboard: <a href='{DASHBOARD_URL}'>{DASHBOARD_URL}</a>. "
                  "If a campaign keeps showing up, consider switching it to Auto (only you can do that).</p>")
     skipped = [f"{b['brand']}: {b['skipped']}" for b in report if b.get("skipped")]

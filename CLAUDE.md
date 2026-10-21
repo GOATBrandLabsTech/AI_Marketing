@@ -149,6 +149,13 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
   `ADDITIONS_DRY_RUN` (starts True; Amit flips it after checking one run). Never auto-accepted, even on Auto.
 - Rejected ideas are not offered again for 30 days.
 
+## AI Agent page (2026-10-21)
+- One page, shared header `templates/_agent_header.html`, tabs: Bid suggestions (`/ondemand`), New keywords
+  (`/ondemand?view=keywords`), Chat (`/chat`). Sidebar item "AI Agent"; "On-Demand AI", "Agent Chat" and
+  "Before / After" are gone. `/impact` redirects to Ads Performance (the before/after data still feeds a chat tool).
+- Chat tab hides for brand-limited accounts only if the portal passes a header named in env
+  `PORTAL_ALL_BRANDS_HEADER` (value "false" = limited); the portal itself also blocks /chat for them.
+
 ## Open items (next session)
 - Chumbak 607168 malformed reply (13-14 Oct, "Recovered N objects", rest backfilled at 0.70 -> REVIEW): fixed
   2026-10-14 in `generate_ondemand_suggestions` - Sonnet 5.5 thinks by default and thinking counts against
