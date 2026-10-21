@@ -67,3 +67,13 @@ def test_push_email_shows_old_and_new_bid():
     code = _code(_load(NOTEBOOKS[1]))
     assert "push_report.change_lines(" in code and "old_cpm_by_kw" in code
     assert 'f"  {kw}: -> {cpm}"' not in code
+
+
+def test_push_sends_all_india_campaigns_with_city_ids_minus_one():
+    """Blinkit refuses city_ids "" (21 Oct: all 11 all-India campaigns failed);
+    all-India must go out as "-1", and a CITY campaign with no cities is still refused."""
+    import json
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "jobs", "Blinkit_Ondemand_Bid_Push.ipynb")
+    src = "".join("".join(c["source"]) for c in json.load(open(path, encoding="utf-8"))["cells"])
+    assert 'meta["region_type"] == "PAN_INDIA"' in src and 'meta["region_ids"] = "-1"' in src
+    assert "never send a city campaign with an empty city list" in src
