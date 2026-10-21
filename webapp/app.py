@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 from collections import Counter
 from datetime import date, datetime, time, timedelta
@@ -795,7 +796,15 @@ def chat_page():
     thread_id = request.args.get("thread")
     if not thread_id and threads:
         thread_id = threads[0]["thread_id"]
-    messages = chat.get_messages(thread_id) if thread_id else []
+    messages = [dict(m) for m in (chat.get_messages(thread_id) if thread_id else [])]
+    for m in messages:
+        calls = m.get("tool_calls")
+        if isinstance(calls, str):
+            try:
+                calls = json.loads(calls)
+            except ValueError:
+                calls = None
+        m["tables"] = [c["table"] for c in (calls or []) if isinstance(c, dict) and c.get("table")]
     notes = queries.fetch_notes(brand, include_stale=False, limit=50)
     return render_template(
         "chat.html", threads=threads, thread_id=thread_id, messages=messages, notes=notes, active="chat"
@@ -829,7 +838,8 @@ def api_chat_send(thread_id):
         reply, tool_log = chat.send_message(thread_id, brand, message)
     except Exception as exc:
         return jsonify({"error": f"chat failed: {exc}"}), 502
-    return jsonify({"reply": reply, "tools_used": [t["tool"] for t in tool_log]})
+    return jsonify({"reply": reply, "tools_used": [t["tool"] for t in tool_log],
+                    "tables": [t["table"] for t in tool_log if t.get("table")]})
 
 
 if __name__ == "__main__":
