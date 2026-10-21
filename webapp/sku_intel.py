@@ -53,7 +53,10 @@ sa AS (
 ),
 cp AS (
     SELECT product_id::text AS pid, COUNT(DISTINCT campaign_id) AS campaigns,
-           STRING_AGG(DISTINCT campaign_id::text, ',') AS campaign_ids
+           STRING_AGG(DISTINCT campaign_id::text, ',') AS campaign_ids,
+           COUNT(DISTINCT campaign_id) FILTER (WHERE region_type = 'CITY') AS city_campaigns,
+           STRING_AGG(DISTINCT campaign_id::text, ',') FILTER (WHERE COALESCE(region_type, '') <> 'CITY')
+               AS other_campaign_ids
     FROM (SELECT p.*, MAX(created_at) OVER (PARTITION BY campaign_id) AS newest
           FROM voylla."Blinkit_CampaignWise_ProductID" p WHERE brand_name = :brand) x
     WHERE created_at >= newest - INTERVAL '1 hour' AND status IN ('ACTIVE', 'ON_HOLD')
@@ -67,9 +70,14 @@ im AS (
     ORDER BY "EAN"
 ),
 bf AS (
-    SELECT product_id::text AS pid, SUM(qty_sold) AS offer_units_7d, SUM(total_brand_fund) AS brand_fund_7d
-    FROM voylla.blinkit_brand_fund
-    WHERE date >= (SELECT MAX(date) FROM voylla.blinkit_brand_fund) - 6
+    -- Brand-funded offers from the PartnersBiz spends feed (loaded daily into the
+    -- warehouse); only rows that actually carried brand money count as offer units.
+    SELECT product_id::text AS pid,
+           SUM(qty_sold) FILTER (WHERE total_brand_fund > 0) AS offer_units_7d,
+           SUM(total_brand_fund) AS brand_fund_7d
+    FROM "DataWarehouse".blinkit_spends_summary
+    WHERE brand = lower(:brand)
+      AND date >= (SELECT MAX(date) FROM "DataWarehouse".blinkit_spends_summary WHERE brand = lower(:brand)) - 6
     GROUP BY 1
 )
 SELECT m.sku, pr.name, m.ean, m.item_id, m.pid, im.product_code, im.category, im.sub_category,
@@ -78,6 +86,7 @@ SELECT m.sku, pr.name, m.ean, m.item_id, m.pid, im.product_code, im.category, im
        COALESCE(st.stock, 0) AS stock, COALESCE(st.warehouses_with_stock, 0) AS warehouses_with_stock,
        COALESCE(sa.units_7d, 0) AS units_7d, COALESCE(sa.units_30d, 0) AS units_30d,
        COALESCE(cp.campaigns, 0) AS campaigns, cp.campaign_ids,
+       COALESCE(cp.city_campaigns, 0) AS city_campaigns, cp.other_campaign_ids,
        COALESCE(bf.offer_units_7d, 0) AS offer_units_7d, COALESCE(bf.brand_fund_7d, 0) AS brand_fund_7d
 FROM m
 LEFT JOIN pr ON pr.pid = m.pid
@@ -96,6 +105,8 @@ FLAG_LABELS = {
     "below_cost": "Landing price below cost",
     "dead_stock": "Stock but no sale in 30 days",
     "overstock": f"Over {OVERSTOCK_DAYS} days of stock",
+    "stock_no_ads": "In stock, not in any campaign",
+    "city_overlap": "In a city campaign and also in another campaign",
 }
 
 
@@ -129,7 +140,18 @@ def sku_flags(r):
         flags.append("dead_stock")
     elif cover is not None and cover > OVERSTOCK_DAYS:
         flags.append("overstock")
+    if stock > 0 and not campaigns:
+        flags.append("stock_no_ads")
+    # A product in a city-targeted campaign should run only there: the same
+    # product in a pan-India campaign competes with it for the same shoppers.
+    if (r.get("city_campaigns") or 0) and other_campaign_ids(r):
+        flags.append("city_overlap")
     return flags
+
+
+def other_campaign_ids(r):
+    """Non-city campaigns of a SKU row (the ones to remove when it is in a city campaign)."""
+    return [c for c in str(r.get("other_campaign_ids") or "").split(",") if c]
 
 
 def sku_snapshot(engine, brand=BRAND):
@@ -147,33 +169,6 @@ def sku_snapshot(engine, brand=BRAND):
 
 def flag_counts(rows):
     return {f: sum(1 for r in rows if f in r["flags"]) for f in FLAG_LABELS}
-
-
-# ── offers file loader ───────────────────────────────────────────────────────
-OFFER_COLUMNS = ["date", "city", "product_id", "item_id", "offer_type", "item_mrp",
-                 "brandfund_absolute_value", "brandfund_percentage_value", "product_name",
-                 "p_type", "qty_sold", "total_brand_fund", "mrp_gmv"]
-
-
-def load_brand_fund_csv(engine, path):
-    """Loads a PartnersBiz 'Spends summary' export into voylla.blinkit_brand_fund.
-    Re-loading the same days replaces them, so a newer export can simply be loaded again."""
-    df = pd.read_csv(path)
-    df = df[df["brand_name"].str.lower() == BRAND.lower()][OFFER_COLUMNS].copy()
-    df["date"] = pd.to_datetime(df["date"]).dt.date
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS voylla.blinkit_brand_fund (
-                date date, city text, product_id text, item_id text, offer_type text, item_mrp numeric,
-                brandfund_absolute_value numeric, brandfund_percentage_value numeric, product_name text,
-                p_type text, qty_sold numeric, total_brand_fund numeric, mrp_gmv numeric,
-                loaded_at timestamp DEFAULT NOW())"""))
-        conn.execute(text("DELETE FROM voylla.blinkit_brand_fund WHERE date BETWEEN :a AND :b"),
-                     {"a": df["date"].min(), "b": df["date"].max()})
-    df["product_id"] = df["product_id"].astype(str)
-    df["item_id"] = df["item_id"].astype(str)
-    df.to_sql("blinkit_brand_fund", engine, schema="voylla", if_exists="append", index=False, method="multi", chunksize=1000)
-    return len(df), df["date"].min(), df["date"].max()
 
 
 # ── one SKU in depth (Phase 2: what the department agents read) ──────────────
@@ -233,10 +228,11 @@ ORDER BY scraped_date
 """
 
 OFFER_HISTORY_SQL = """
-SELECT date, SUM(qty_sold) AS units, SUM(total_brand_fund) AS brand_fund,
+SELECT date, SUM(qty_sold) FILTER (WHERE total_brand_fund > 0) AS units, SUM(total_brand_fund) AS brand_fund,
        STRING_AGG(DISTINCT offer_type, ', ') AS offer_types
-FROM voylla.blinkit_brand_fund
-WHERE product_id = :pid AND date >= (SELECT MAX(date) FROM voylla.blinkit_brand_fund) - 29
+FROM "DataWarehouse".blinkit_spends_summary
+WHERE brand = lower(:brand) AND product_id::text = :pid
+  AND date >= (SELECT MAX(date) FROM "DataWarehouse".blinkit_spends_summary WHERE brand = lower(:brand)) - 29
 GROUP BY 1 ORDER BY 1
 """
 
@@ -311,7 +307,7 @@ def sku_detail(engine, row, brand=BRAND):
         "city_sales": _records(engine, CITY_SALES_SQL, {"brand": brand, "item_id": item}),
         "stock_by_warehouse": _records(engine, STOCK_SQL, {"brand": brand, "item_id": item}),
         "price_history": _records(engine, PRICE_HISTORY_SQL, {"brand": brand, "pid": pid}),
-        "offer_history": _records(engine, OFFER_HISTORY_SQL, {"pid": pid}, optional=True),
+        "offer_history": _records(engine, OFFER_HISTORY_SQL, {"brand": brand, "pid": pid}, optional=True),
         "city_master": {r["city_id"]: r["city_name"] for r in _records(engine, CITY_MASTER_SQL, {}, optional=True)},
     }
     campaigns = _records(engine, SKU_CAMPAIGNS_SQL, {"brand": brand, "pid": pid})

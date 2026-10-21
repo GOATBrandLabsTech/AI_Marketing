@@ -37,3 +37,20 @@ def test_profit_and_stock_health():
     assert "dead_stock" in si.sku_flags(row(units_30d=0, campaigns=0))
     assert "overstock" in si.sku_flags(row(stock=1000, units_30d=30))
     assert si.days_of_cover(100, 30) == 100.0
+
+
+def test_in_stock_but_in_no_campaign():
+    import sku_intel as si
+    assert "stock_no_ads" in si.sku_flags({"stock": 40, "campaigns": 0, "units_30d": 10})
+    assert "stock_no_ads" not in si.sku_flags({"stock": 40, "campaigns": 1, "units_30d": 10})
+    assert "stock_no_ads" not in si.sku_flags({"stock": 0, "campaigns": 0, "units_30d": 10})
+
+
+def test_city_campaign_plus_another_campaign_is_flagged():
+    import sku_intel as si
+    both = {"stock": 40, "campaigns": 2, "units_30d": 10, "city_campaigns": 1, "other_campaign_ids": "900"}
+    assert "city_overlap" in si.sku_flags(both) and si.other_campaign_ids(both) == ["900"]
+    only_cities = dict(both, campaigns=3, city_campaigns=3, other_campaign_ids=None)
+    assert "city_overlap" not in si.sku_flags(only_cities)          # several city campaigns are fine
+    no_city = dict(both, city_campaigns=0)
+    assert "city_overlap" not in si.sku_flags(no_city)

@@ -16,7 +16,7 @@
   </form>
 </div>
 
-<div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+<div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
   <a href="{{ url_for('sku_health', q=search or none) }}" data-soft class="card p-4 block" style="{{ 'box-shadow:0 0 0 2px var(--brand)' if not flag else '' }}">
     <div class="text-[11px] font-semibold uppercase tracking-wide mb-1" style="color:var(--ink-muted)">All SKUs</div>
     <div class="font-display text-2xl font-extrabold">{{ total }}</div>
@@ -76,16 +76,20 @@
           <td class="px-3 py-2 text-right tabular" style="color: {{ 'var(--critical)' if r.profit_per_unit is not none and r.profit_per_unit < 0 else 'inherit' }}">{{ r.profit_per_unit|round|int if r.profit_per_unit is not none else '-' }}</td>
           <td class="px-3 py-2 text-right tabular">{{ '₹{:,.0f}'.format(r.brand_fund_7d) if r.brand_fund_7d else '-' }}</td>
           <td class="px-3 py-2 text-xs" style="min-width:260px" data-sort="{{ r.campaigns or 0 }}">
+            {% set others = (r.other_campaign_ids or '').split(',') %}
             {% for cid in (r.campaign_ids or '').split(',') if cid %}
             {% set rm = removals.get(cid ~ '|' ~ r.pid) %}
+            {% set is_city = r.city_campaigns and cid not in others %}
             <div class="flex items-center gap-2 mb-1">
               {% if rm and rm.status == 'pending' %}
                 <span class="badge" style="background:#fef3e2;color:#8a5a00">Removal pending</span>
                 <span class="truncate max-w-[150px]" title="{{ cid }}">{{ campaign_names.get(cid) or cid }}</span>
                 <button class="underline" onclick="cancelRemoval({{ rm.id }})">Cancel</button>
               {% else %}
-                <input type="checkbox" class="campSel" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" onchange="updateSelCount()">
+                <input type="checkbox" class="campSel" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" onchange="updateSelCount()"
+                       {{ 'checked' if flag == 'city_overlap' and 'city_overlap' in r.flags and not is_city and not rm else '' }}>
                 <span class="truncate max-w-[170px]" title="{{ cid }}">{{ campaign_names.get(cid) or cid }}</span>
+                {% if is_city %}<span class="badge" style="background:#eaf1fd;color:#1d5fc9">City</span>{% endif %}
                 {% if rm and rm.status == 'done' %}<span class="badge" style="background:#e8f4ec;color:#1f6b3a">Removed, awaiting refresh</span>
                 {% elif rm and rm.status == 'failed' %}<span class="badge" title="{{ rm.push_note or '' }}" style="background:#fbeaea;color:#9c2626">Removal failed</span>{% endif %}
                 <button class="underline" style="color:var(--critical)" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" onclick="removeOne(this)">Remove</button>
@@ -106,7 +110,8 @@
 </div>
 <p class="text-xs mt-3" style="color:var(--ink-muted)">
   Days of cover = Blinkit stock ÷ average daily units over 30 days. Profit / unit = landing price (LP) − cost price.
-  Price issues are judged only on in-stock listings (an out-of-stock listing often shows MRP). Brand fund = Voylla-funded discount from the PartnersBiz spends file.
+  Price issues are judged only on in-stock listings (an out-of-stock listing often shows MRP). Brand fund = Voylla-funded discount over the last 7 days of the PartnersBiz spends feed (DataWarehouse.blinkit_spends_summary).
+  "In a city campaign and also in another campaign": the other (non-city) campaigns come pre-ticked on that view, so one click queues their removal; the city campaign stays.
 </p>
 {% endblock %}
 {% block scripts %}
@@ -115,6 +120,7 @@ const removalReason = {{ (labels[flag] if flag else 'SKU Health')|tojson }};
 function updateSelCount() {
   document.getElementById('selCount').textContent = document.querySelectorAll('.campSel:checked').length + ' selected';
 }
+updateSelCount();   // the city-overlap view arrives with the non-city campaigns pre-ticked
 function selectAllCampaigns(on) {
   document.querySelectorAll('.campSel').forEach(cb => cb.checked = on);
   updateSelCount();

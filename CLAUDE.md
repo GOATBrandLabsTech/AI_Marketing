@@ -42,9 +42,13 @@ Owner: Amit (Analytics). Explain things plainly, explain before asking for appro
 - Stock: `"DataWarehouse".blinkit_soh` (item_id, backend_facility_name, backend+frontend qty; latest created_at).
 - Live price: `"DataWarehouse".blinkit_pricing` (product_id, selling_price, mrp, in_stock, scraped_date).
   An out-of-stock listing often shows MRP - only compare prices on in-stock listings.
-- Offers: `voylla.blinkit_brand_fund` (PartnersBiz spends export; loader `sku_intel.load_brand_fund_csv`).
+- Offers: `"DataWarehouse".blinkit_spends_summary` (PartnersBiz spends, loaded daily; `brand` is lowercase; one row per date x city x product; `total_brand_fund` > 0 = an offer we paid for). The old one-time Excel table `voylla.blinkit_brand_fund` is no longer read.
 - Warehouse -> cluster -> city: `voylla."QC_City_Mappping"` (Channel, City Name, Cluster Name, Facility).
 - Item master: `voylla.voylla_in_unicommerce_itemmaster_dedup` (EAN, Product Code, Category, Cost Price).
+- Blinkit item -> category, the team's way: `blinkit_sales.item_id` -> `Blinkit_Mapping."ITEM ID"` -> EAN -> item master
+  (`"Category Name"`, `"Sub-Category"`, `"Look"`, `"Collection"`) and `voylla."Ordering_Categories"."New Category"`
+  = the ordering TIER (A.Hero, B. Robin, C. AS, D. New Launches, G. Slow Movers, H. MUDA ...), not a product category.
+  `blinkit_sales.category` is only "Fashion and Accessories". Agent Chat tool `get_sales_breakdown` (`webapp/breakdown.py`).
 - Other channels (Instamart, Zepto, Myntra, Amazon, offline) join on EAN.
 
 ## Current project: department agents + boss (merged to main; Render test copy runs main)
