@@ -18,7 +18,9 @@ BY_OPTIONS = ("product", "category", "product_type", "tier", "city")
 
 SALES_SQL = """
 SELECT item_id::text AS item_id, MAX(item_name) AS name, city_name AS city,
-       SUM(qty_sold) AS units, SUM(qty_sold * COALESCE(mrp, 0)) AS mrp_value
+       -- blinkit_sales.mrp is already the row's total (qty x unit MRP: 42 pairs x 349 = 14,658),
+       -- so it is summed as is; multiplying by qty again inflated it ~qty times (21 Oct)
+       SUM(qty_sold) AS units, SUM(COALESCE(mrp, 0)) AS mrp_value
 FROM "DataWarehouse".blinkit_sales
 WHERE brand = lower(:brand) AND date >= CURRENT_DATE - :days AND date < CURRENT_DATE
 GROUP BY 1, 3

@@ -75,6 +75,7 @@ Their "was_implemented"/verdict logic requires an actual live push (push_status 
 independent Blinkit_Ondemand_Bid_Push.ipynb), which stays in DRY_RUN until a human turns it off - so \
 until then, expect verdicts to be empty/NULL for everything. That's correct, not a bug: nothing has \
 actually gone live yet, so there is nothing to honestly attribute a ROAS change to.
+- Tables: the result of get_sales_breakdown is shown to the user automatically as a proper table right under your reply, with Copy, Download CSV and Chart buttons. Do NOT repeat it and NEVER write a markdown table (the chat cannot draw one): write 2-4 short sentences on what stands out - the leader and its share, a big gap, stock that will not last. When the user asks for a chart, graph or visual, call the tool with chart=true; for anything else, short lists are fine.
 - SKU questions (Voylla only): get_sku_report gives the five department reports for free; call \
 recommend_for_sku only when the user wants a recommendation for a goal (it is an extra AI call). Pass on \
 the boss's action, reasons and any safety-rule overrule, and link the SKU page it returns. Taking a SKU out \
@@ -291,6 +292,7 @@ TOOLS = [
                              "e.g. earrings, studs, jhumki, hero. Optional.")},
                 "days": {"type": "integer", "description": "Period ending yesterday, 1-90, default 30"},
                 "top": {"type": "integer", "description": "How many rows, default 10, max 50"},
+                "chart": {"type": "boolean", "description": "true when the user asks for a chart, graph or visual"},
             },
             "required": ["brand"],
         },
@@ -624,7 +626,7 @@ def _tool_sku_report(brand, sku):
             "reports": found["reports"], "page": f"/sku-health/sku/{row['sku']}"}
 
 
-def _tool_sales_breakdown(brand, by="product", city=None, category=None, days=30, top=10):
+def _tool_sales_breakdown(brand, by="product", city=None, category=None, days=30, top=10, chart=False):
     import breakdown
     from db import get_engine
     return breakdown.breakdown(get_engine(), brand, by=by, city=city, category=category, days=days, top=top)
@@ -657,6 +659,44 @@ TOOL_FUNCTIONS = {
     "get_sales_breakdown": _tool_sales_breakdown,
     "recommend_for_sku": _tool_recommend_for_sku,
 }
+
+
+# ── tables shown under a reply ───────────────────────────────────────────────
+# Built here from the tool's own rows, so the numbers on screen are the data,
+# not the model retyping it; the page adds Copy / CSV / Chart buttons.
+_BY_LABEL = {"product": "Product", "category": "Category", "product_type": "Type", "tier": "Tier", "city": "City"}
+
+
+def table_from_result(name, tool_input, result):
+    if name != "get_sales_breakdown" or not isinstance(result, dict) or not result.get("rows"):
+        return None
+    by, city = result.get("by") or "product", result.get("city")
+    if by == "product":
+        cols = [("product_code", "Code", "text"), ("name", "Product", "text"), ("product_type", "Type", "text"),
+                ("tier", "Tier", "text")]
+    else:
+        cols = [(by, _BY_LABEL.get(by, by), "text")]
+    cols += [("units", "Units", "int"), ("mrp_value", "MRP value (Rs)", "int"), ("share_pct", "Share %", "pct")]
+    if by == "product":
+        if city:
+            cols.append(("stock_in_city", f"Stock in {city}", "int"))
+        cols += [("stock_total", "Stock total", "int"), ("live_price", "Live price (Rs)", "int")]
+    elif by == "city":
+        cols += [("products_sold", "Products sold", "int"), ("stock_in_city", "Stock in city", "int")]
+    else:
+        cols += [("products_sold", "Products sold", "int"), ("stock_total", "Stock total", "int")]
+    what = (result.get("category") or "").strip()
+    title = (f"Top {len(result['rows'])} {what + ' ' if what else ''}by {_BY_LABEL.get(by, by).lower()}"
+             f"{' in ' + city if city else ''} - {result.get('brand')}, {result.get('period')}")
+    rows = [{"rank": i + 1, **{k: r.get(k) for k, _, _ in cols}} for i, r in enumerate(result["rows"])]
+    return {
+        "title": title,
+        "columns": [{"key": "rank", "label": "#", "type": "int"}] + [{"key": k, "label": l, "type": t} for k, l, t in cols],
+        "rows": rows,
+        "chart": {"label": "name" if by == "product" else by, "value": "units", "value_label": "Units"},
+        "show_chart": bool((tool_input or {}).get("chart")),
+        "note": result.get("note"),
+    }
 
 
 def _execute_tool(name, tool_input, brand):
@@ -761,7 +801,11 @@ def send_message(thread_id, brand, user_message):
             if block.type != "tool_use":
                 continue
             result = _execute_tool(block.name, block.input, brand)
-            tool_log.append({"tool": block.name, "input": block.input})
+            entry = {"tool": block.name, "input": block.input}
+            table = table_from_result(block.name, block.input, result)
+            if table:
+                entry["table"] = table
+            tool_log.append(entry)
             tool_result_blocks.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
