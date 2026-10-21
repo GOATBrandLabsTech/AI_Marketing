@@ -137,6 +137,18 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
   Subject contains "failed" on purpose: Amit's Gmail filter archives automation mail without error/failed words.
 - Report-only check (no AI, no mail, no writes): `perf_alerts.run(send=False, generate=False, log=False)`.
 
+## New keyword ideas (`webapp/keyword_ideas.py`, added 2026-10-21)
+- Daily, at the end of the 1:15 pm perf-alerts run (no extra cron). Source: `voylla."Blinkit_keyword_suggestions_history"`
+  (one snapshot a day since 2026-07-29; `searches` is a ROLLING 30-day total, so it keeps rising for days after a
+  festival ends - hence the `OCCASIONS` calendar in the module, update its dates every year).
+- Filters: >= 500 searches; not targeted by ANY campaign of the brand (`Blinkit_CPM`); not another brand's name
+  (Blinkit's `is_brand_keyword` covers "chocolate", "giva", "casio" ...); not a one-word term over 50k searches;
+  product has stock; product is in a live campaign (the idea goes to its best-ROAS one). Then Sonnet checks fit.
+- Saved PENDING in `voylla.blinkit_keyword_ideas`; reviewed on On-Demand AI -> New keywords (`/ondemand?view=keywords`,
+  same portal page, no PAGES edit). Accepted -> the push adds it (EXACT, the accepted bid) behind
+  `ADDITIONS_DRY_RUN` (starts True; Amit flips it after checking one run). Never auto-accepted, even on Auto.
+- Rejected ideas are not offered again for 30 days.
+
 ## Open items (next session)
 - Chumbak 607168 malformed reply (13-14 Oct, "Recovered N objects", rest backfilled at 0.70 -> REVIEW): fixed
   2026-10-14 in `generate_ondemand_suggestions` - Sonnet 5.5 thinks by default and thinking counts against

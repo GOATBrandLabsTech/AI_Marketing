@@ -78,3 +78,12 @@ def test_push_sends_all_india_campaigns_with_city_ids_minus_one():
     code = _code(_load(NOTEBOOKS[1]))
     assert 'meta["region_type"] == "PAN_INDIA"' in code and 'meta["region_ids"] = "-1"' in code
     assert "never send a city campaign with an empty city list" in code
+
+
+def test_push_adds_accepted_keywords_behind_their_own_switch():
+    code = _code(_load(NOTEBOOKS[1]))
+    assert "ADDITIONS_DRY_RUN = True" in code or "ADDITIONS_DRY_RUN = False" in code
+    assert "[ADDITIONS DRY RUN]" in code
+    assert "keyword_ideas.additions_to_apply(engine, brand, campaign_id" in code
+    assert "keyword_ideas.mark_additions(engine, addition_ids, new_status, note)" in code
+    assert "ok, note, removal_ids, addition_ids = push_campaign(" in code

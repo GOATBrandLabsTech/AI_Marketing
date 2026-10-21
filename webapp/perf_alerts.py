@@ -167,7 +167,7 @@ def _inr(v):
     return f"&#8377;{v:,.0f}"
 
 
-def build_email(report, today):
+def build_email(report, today, keyword_ideas_waiting=0):
     """(subject, html) or None when there is nothing to say."""
     flagged = [c for b in report for c in b["campaigns"]]
     if not flagged:
@@ -213,6 +213,9 @@ def build_email(report, today):
     if others:
         parts.append(f"<h3 style='font:bold 15px Arial'>Failed the ROAS check today ({n_new} sent to the AI)</h3>"
                      + table(others))
+    if keyword_ideas_waiting:
+        parts.append(f"<p style='font:14px Arial'><b>{keyword_ideas_waiting} new keyword idea(s)</b> are waiting for "
+                     "you on On-Demand AI &rarr; New keywords (untargeted searches that are growing).</p>")
     parts.append(f"<p style='font:13px Arial'>Open the dashboard: <a href='{DASHBOARD_URL}'>{DASHBOARD_URL}</a>. "
                  "If a campaign keeps showing up, consider switching it to Auto (only you can do that).</p>")
     skipped = [f"{b['brand']}: {b['skipped']}" for b in report if b.get("skipped")]
@@ -274,7 +277,16 @@ def run(today=None, send=True, generate=True, brands=BRANDS, log=True):
             for c in b["campaigns"]:
                 _log(engine, today, c)
 
-    mail = build_email(report, today)
+    waiting = 0
+    if generate:
+        # New keyword ideas for every brand, once a day, after the alerts (never stops the alert)
+        try:
+            import keyword_ideas
+            keyword_ideas.run(brands=tuple(brands))
+            waiting = sum(1 for b in brands for i in keyword_ideas.list_ideas(engine, b) if i["status"] == "pending")
+        except Exception as exc:
+            print(f"[perf] keyword ideas failed: {exc}")
+    mail = build_email(report, today, keyword_ideas_waiting=waiting)
     if mail and send:
         send_email(*mail)
         print(f"[perf] email sent: {mail[0]}")
