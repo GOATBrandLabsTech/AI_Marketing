@@ -1781,7 +1781,12 @@ def add_schedule_window(campaign_id, campaign_name, brand):
             " start_time, end_time, is_active, status, pause_on_gap, updated_at) "
             "VALUES (%(entry_id)s, %(campaign_id)s, %(campaign_name)s, %(brand)s, "
             "        CURRENT_DATE, CURRENT_DATE, '00:00:00', '00:00:00', "
-            "        true, 'PENDING', false, NOW())",
+            "        true, 'PENDING', "
+            # a new window takes the campaign's pause-on-gap setting (see
+            # campaign_pauses_on_gap); a campaign's first window starts off
+            "        COALESCE((SELECT bool_or(COALESCE(pause_on_gap, true)) "
+            "                  FROM voylla.\"Blinkit_Campaign_Schedule_Entries\" "
+            "                  WHERE campaign_id = %(campaign_id)s), false), NOW())",
             {
                 "entry_id": entry_id,
                 "campaign_id": str(campaign_id),
@@ -1843,6 +1848,24 @@ def save_schedule_window(entry_id, campaign_id, start_date, end_date, start_hour
                 "entry_id": entry_id,
             },
         )
+
+
+def campaign_pauses_on_gap(entries):
+    """The scheduler (Blinkit_Campaign_Control.ipynb) pauses a campaign in the
+    hours no window covers when ANY of its windows has pause_on_gap on, and it
+    reads a blank as on. Same rule here so the checkbox shows what it will do."""
+    return any(e.get("pause_on_gap") is None or bool(e.get("pause_on_gap")) for e in entries)
+
+
+def set_pause_on_gap(campaign_id, value):
+    """Campaign-level switch: sets pause_on_gap on every window of the campaign."""
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            'UPDATE voylla."Blinkit_Campaign_Schedule_Entries" '
+            "SET pause_on_gap = %(v)s, updated_at = NOW() WHERE campaign_id = %(campaign_id)s",
+            {"v": bool(value), "campaign_id": str(campaign_id)},
+        )
+        return cur.rowcount
 
 
 def remove_schedule_window(entry_id):
