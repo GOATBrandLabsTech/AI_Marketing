@@ -664,9 +664,9 @@ def api_sku_queue_removals():
     if not items:
         return jsonify({"error": "nothing selected"}), 400
     engine = get_engine()
-    ok, rejected = sku_actions.valid_requests(items, sku_intel.sku_snapshot(engine))
-    added = sku_actions.queue_removals(engine, sku_intel.BRAND, ok, requested_by="dashboard",
-                                       reason=payload.get("reason"))
+    ok, rejected = sku_actions.valid_requests(items, sku_intel.sku_snapshot(engine), sku_intel.FLAG_LABELS)
+    # each removal records the product's own flags, not the page view it was clicked from
+    added = sku_actions.queue_removals(engine, sku_intel.BRAND, ok, requested_by="dashboard")
     return jsonify({"ok": True, "queued": added, "already_pending": len(ok) - added, "rejected": rejected})
 
 

@@ -29,18 +29,33 @@ def ensure_table(engine):
         conn.execute(text(TABLE_SQL))
 
 
-def valid_requests(items, rows):
+def sku_reason(row, labels):
+    """Why THIS product is being removed: its own flags at the moment of the
+    click, plus stock and sales so the record makes sense later. (Until
+    2026-10-21 the reason was the name of the page view the user was on, so
+    out-of-stock products were filed as 'Over 90 days of stock'.)"""
+    flags = [labels.get(f, f) for f in (row.get("flags") or [])]
+    facts = f"stock {row.get('stock') or 0}, {row.get('units_30d') or 0} sold in 30 days"
+    return (", ".join(flags) + " - " if flags else "No flag - ") + facts
+
+
+def valid_requests(items, rows, labels=None):
     """Keeps only (campaign_id, product_id) pairs that the SKU snapshot says are
-    live right now. items: [{"campaign_id", "pid"}]; rows: sku_intel.sku_snapshot."""
+    live right now, each with its own reason. items: [{"campaign_id", "pid"}];
+    rows: sku_intel.sku_snapshot."""
     live = {}
     for r in rows:
         for cid in str(r.get("campaign_ids") or "").split(","):
             if cid.strip():
-                live[(cid.strip(), str(r.get("pid")))] = r.get("sku")
+                live[(cid.strip(), str(r.get("pid")))] = r
     ok, rejected = [], []
     for it in items:
         key = (str(it.get("campaign_id") or "").strip(), str(it.get("pid") or "").strip())
-        (ok if key in live else rejected).append({"campaign_id": key[0], "pid": key[1], "sku": live.get(key)})
+        r = live.get(key)
+        entry = {"campaign_id": key[0], "pid": key[1], "sku": r.get("sku") if r else None}
+        if r:
+            entry["reason"] = sku_reason(r, labels or {})
+        (ok if r else rejected).append(entry)
     return ok, rejected
 
 
@@ -60,7 +75,7 @@ def queue_removals(engine, brand, items, requested_by=None, reason=None):
                 INSERT INTO voylla.sku_campaign_removals (brand, campaign_id, product_id, sku, reason, requested_by)
                 VALUES (:b, :c, :p, :s, :r, :u)"""),
                 {"b": brand, "c": it["campaign_id"], "p": it["pid"], "s": it.get("sku"),
-                 "r": reason, "u": requested_by})
+                 "r": it.get("reason") or reason, "u": requested_by})
             added += 1
     return added
 

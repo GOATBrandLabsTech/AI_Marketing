@@ -86,13 +86,13 @@
                 <span class="truncate max-w-[150px]" title="{{ cid }}">{{ campaign_names.get(cid) or cid }}</span>
                 <button class="underline" onclick="cancelRemoval({{ rm.id }})">Cancel</button>
               {% else %}
-                <input type="checkbox" class="campSel" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" onchange="updateSelCount()"
+                <input type="checkbox" class="campSel" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" data-stock="{{ r.stock or 0 }}" data-units="{{ r.units_30d or 0 }}" onchange="updateSelCount()"
                        {{ 'checked' if flag == 'city_overlap' and 'city_overlap' in r.flags and not is_city and not rm else '' }}>
                 <span class="truncate max-w-[170px]" title="{{ cid }}">{{ campaign_names.get(cid) or cid }}</span>
                 {% if is_city %}<span class="badge" style="background:#eaf1fd;color:#1d5fc9">City</span>{% endif %}
                 {% if rm and rm.status == 'done' %}<span class="badge" style="background:#e8f4ec;color:#1f6b3a">Removed, awaiting refresh</span>
                 {% elif rm and rm.status == 'failed' %}<span class="badge" title="{{ rm.push_note or '' }}" style="background:#fbeaea;color:#9c2626">Removal failed</span>{% endif %}
-                <button class="underline" style="color:var(--critical)" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" onclick="removeOne(this)">Remove</button>
+                <button class="underline" style="color:var(--critical)" data-cid="{{ cid }}" data-pid="{{ r.pid }}" data-sku="{{ r.sku }}" data-stock="{{ r.stock or 0 }}" data-units="{{ r.units_30d or 0 }}" onclick="removeOne(this)">Remove</button>
               {% endif %}
             </div>
             {% else %}-{% endfor %}
@@ -116,7 +116,8 @@
 {% endblock %}
 {% block scripts %}
 <script>initSortableTable('skuTable');
-const removalReason = {{ (labels[flag] if flag else 'SKU Health')|tojson }};
+// a product that is in stock and selling is rarely meant to come out of a campaign
+const SELLING_UNITS_30D = 30;
 function updateSelCount() {
   document.getElementById('selCount').textContent = document.querySelectorAll('.campSel:checked').length + ' selected';
 }
@@ -128,19 +129,29 @@ function selectAllCampaigns(on) {
 async function queueRemovals(items) {
   if (!items.length) { toast('Nothing selected', false); return; }
   const skus = new Set(items.map(i => i.sku)).size;
-  if (!confirm(`Take ${skus} SKU(s) out of ${items.length} campaign slot(s)? The 2 pm push job sends this to Blinkit.`)) return;
-  const res = await postJSON('/api/sku/removals', { items, reason: removalReason });
+  const selling = [...new Set(items.filter(i => i.stock > 0 && i.units >= SELLING_UNITS_30D)
+                                   .map(i => `${i.sku} (stock ${i.stock}, ${i.units} sold in 30 days)`))];
+  const warn = selling.length
+    ? `
+
+CHECK: ${selling.length} of these are IN STOCK and SELLING:
+- ${selling.slice(0, 8).join('
+- ')}${selling.length > 8 ? '
+- ...' : ''}
+Removing them stops their ads in that campaign.`
+    : '';
+  if (!confirm(`Take ${skus} SKU(s) out of ${items.length} campaign slot(s)? The 2 pm push job sends this to Blinkit.${warn}`)) return;
+  const res = await postJSON('/api/sku/removals', { items });
   let msg = `${res.queued} removal(s) queued`;
   if (res.already_pending) msg += `, ${res.already_pending} already pending`;
   if (res.rejected && res.rejected.length) msg += `, ${res.rejected.length} no longer in that campaign`;
   toast(msg, true);
   setTimeout(() => location.reload(), 900);
 }
-function removeOne(b) { queueRemovals([{ campaign_id: b.dataset.cid, pid: b.dataset.pid, sku: b.dataset.sku }]); }
-function removeSelected() {
-  queueRemovals([...document.querySelectorAll('.campSel:checked')].map(cb => ({
-    campaign_id: cb.dataset.cid, pid: cb.dataset.pid, sku: cb.dataset.sku })));
-}
+const pick = el => ({ campaign_id: el.dataset.cid, pid: el.dataset.pid, sku: el.dataset.sku,
+                     stock: Number(el.dataset.stock || 0), units: Number(el.dataset.units || 0) });
+function removeOne(b) { queueRemovals([pick(b)]); }
+function removeSelected() { queueRemovals([...document.querySelectorAll('.campSel:checked')].map(pick)); }
 async function cancelRemoval(id) {
   await postJSON(`/api/sku/removals/${id}/cancel`, {});
   toast('Removal cancelled', true);
