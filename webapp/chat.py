@@ -270,6 +270,32 @@ TOOLS = [
         },
     },
     {
+        "name": "get_sales_breakdown",
+        "description": (
+            "Any brand. Sales, stock and live price broken down and ranked: by product, category, "
+            "product type or city, optionally filtered to one city and/or one category (e.g. "
+            "'earrings', 'studs', 'rings'). Use for 'top 10 earrings sold in Kolkata', 'which cities "
+            "sell most rings', 'sales by category last 7 days', 'stock of earrings in Mumbai', "
+            "'best sellers this month'. Units are all Blinkit orders (not only ads); MRP value = "
+            "units x MRP. Plain data, no AI cost."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string", "description": "Voylla, Chumbak, Petcrux, etc."},
+                "by": {"type": "string", "enum": ["product", "category", "product_type", "tier", "city"],
+                       "description": ("What each row is. Default product. tier = the ordering tier "
+                                       "(A.Hero, B. Robin, C. AS, D. New Launches ...).")},
+                "city": {"type": "string", "description": "Only this city, e.g. Kolkata. Optional."},
+                "category": {"type": "string", "description": ("Only this category, product type or tier, "
+                             "e.g. earrings, studs, jhumki, hero. Optional.")},
+                "days": {"type": "integer", "description": "Period ending yesterday, 1-90, default 30"},
+                "top": {"type": "integer", "description": "How many rows, default 10, max 50"},
+            },
+            "required": ["brand"],
+        },
+    },
+    {
         "name": "recommend_for_sku",
         "description": (
             "Voylla only. Asks the boss agent (one extra AI call) to recommend ONE action for a SKU "
@@ -598,6 +624,12 @@ def _tool_sku_report(brand, sku):
             "reports": found["reports"], "page": f"/sku-health/sku/{row['sku']}"}
 
 
+def _tool_sales_breakdown(brand, by="product", city=None, category=None, days=30, top=10):
+    import breakdown
+    from db import get_engine
+    return breakdown.breakdown(get_engine(), brand, by=by, city=city, category=category, days=days, top=top)
+
+
 def _tool_recommend_for_sku(brand, sku, goal):
     import sku_agents
     from db import get_engine
@@ -622,6 +654,7 @@ TOOL_FUNCTIONS = {
     "file_note": _tool_file_note,
     "get_notes": _tool_get_notes,
     "get_sku_report": _tool_sku_report,
+    "get_sales_breakdown": _tool_sales_breakdown,
     "recommend_for_sku": _tool_recommend_for_sku,
 }
 
