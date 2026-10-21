@@ -380,56 +380,11 @@ def api_ondemand_bulk_accept():
 
 
 @app.route("/impact")
-@login_required
-def impact():
-    brand = current_brand()
-    session["brand"] = brand
-
-    if brand == queries.ALL_BRANDS:
-        return render_template("impact.html", chooser=queries.fetch_brands(), active="impact")
-
-    latest_ondemand = queries.fetch_latest_ondemand_action_date(brand)
-    default_cutover = latest_ondemand or (date.today() - timedelta(days=1))
-    cutover = request.args.get("cutover")
-    cutover_date = date.fromisoformat(cutover) if cutover else default_cutover
-    pre_days = int(request.args.get("pre_days", 7))
-    min_spend = float(request.args.get("min_spend", 60))
-    campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" and not request.args.get("all_campaigns") else None
-
-    rows, summary = queries.fetch_before_after_matrix(
-        brand, cutover_date, pre_days=pre_days, min_spend=min_spend, campaign_ids=campaign_ids
-    )
-    return render_template(
-        "impact.html",
-        rows=rows,
-        summary=summary,
-        cutover_date=cutover_date,
-        pre_days=pre_days,
-        min_spend=min_spend,
-        scoped_to_showcase=bool(campaign_ids),
-        active="impact",
-    )
-
-
 @app.route("/impact.csv")
 @login_required
-def impact_csv():
-    brand = current_brand()
-    default_cutover = queries.CHUMBAK_SHOWCASE_GO_LIVE if brand == "Chumbak" else (date.today() - timedelta(days=1))
-    cutover = request.args.get("cutover")
-    cutover_date = date.fromisoformat(cutover) if cutover else default_cutover
-    pre_days = int(request.args.get("pre_days", 7))
-    min_spend = float(request.args.get("min_spend", 60))
-    campaign_ids = queries.CHUMBAK_SHOWCASE_CAMPAIGN_IDS if brand == "Chumbak" and not request.args.get("all_campaigns") else None
-    rows, _ = queries.fetch_before_after_matrix(
-        brand, cutover_date, pre_days=pre_days, min_spend=min_spend, campaign_ids=campaign_ids
-    )
-    columns = [
-        "campaign_id", "campaign_name", "targeting", "action", "spend_before", "spend_after",
-        "roas_before", "roas_after", "roas_delta", "verdict", "meaningful",
-        "expectation", "expectation_reason",
-    ]
-    return csv_response(rows, columns, f"before_after_{brand}_{cutover_date}.csv")
+def impact():
+    """Before/After was retired on 2026-10-21: Ads Performance covers it. Old links land there."""
+    return redirect(url_for("roas", brand=current_brand()))
 
 
 @app.route("/api/actions/<unique_key>/accept", methods=["POST"])
@@ -469,6 +424,30 @@ def api_override_action(unique_key):
     return jsonify({"ok": True})
 
 
+def chat_allowed():
+    """Chat can read any brand, so the portal shows it only to full-access
+    accounts. If the portal tells us who is asking (header named in
+    PORTAL_ALL_BRANDS_HEADER, value 'false' for a brand-limited account), the
+    Chat tab is hidden for them too; without that header, it shows."""
+    header = os.environ.get("PORTAL_ALL_BRANDS_HEADER")
+    return not (header and (request.headers.get(header) or "").strip().lower() == "false")
+
+
+def _agent_counts(brand, bid_rows=None):
+    """Numbers on the AI Agent tabs: suggestions and keyword ideas waiting for a person."""
+    import keyword_ideas
+    from db import get_engine
+    counts = {}
+    try:   # a badge must never take the page down (e.g. no database login)
+        counts["keywords"] = sum(1 for i in keyword_ideas.list_ideas(get_engine(), brand) if i.get("status") == "pending")
+    except Exception:
+        pass
+    if bid_rows is not None:
+        counts["bids"] = sum(1 for r in bid_rows if r.get("user_implemented") in (None, "")
+                             and r.get("action") not in (None, "NO_CHANGE"))
+    return counts
+
+
 @app.route("/ondemand")
 @login_required
 def ondemand():
@@ -484,8 +463,10 @@ def ondemand():
     if request.args.get("view") == "keywords":
         import keyword_ideas
         from db import get_engine
-        return render_template("keyword_ideas.html", ideas=keyword_ideas.list_ideas(get_engine(), brand),
-                               channel=channel, channels=CHANNELS, active="ondemand")
+        ideas = keyword_ideas.list_ideas(get_engine(), brand)
+        return render_template("keyword_ideas.html", ideas=ideas, channel=channel, channels=CHANNELS,
+                               active="ondemand", agent_tab="keywords", show_chat=chat_allowed(),
+                               tab_counts={"keywords": sum(1 for i in ideas if i.get("status") == "pending")})
 
     campaign_filter = request.args.get("campaign_id") or None
     cfuncs = _channel_funcs(channel)
@@ -510,6 +491,9 @@ def ondemand():
         channel=channel,
         channels=CHANNELS,
         active="ondemand",
+        agent_tab="bids",
+        show_chat=chat_allowed(),
+        tab_counts=_agent_counts(brand, rows),
     )
 
 
@@ -848,7 +832,8 @@ def chat_page():
         m["tables"] = [c["table"] for c in (calls or []) if isinstance(c, dict) and c.get("table")]
     notes = queries.fetch_notes(brand, include_stale=False, limit=50)
     return render_template(
-        "chat.html", threads=threads, thread_id=thread_id, messages=messages, notes=notes, active="chat"
+        "chat.html", threads=threads, thread_id=thread_id, messages=messages, notes=notes, active="chat",
+        agent_tab="chat", show_chat=True, channel="Blinkit", tab_counts=_agent_counts(brand),
     )
 
 

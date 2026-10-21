@@ -1,35 +1,14 @@
 {% extends "base.html" %}
-{% block title %}On-Demand AI - Blinkit Control{% endblock %}
+{% block title %}AI Agent - Bid suggestions{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-7 flex-wrap gap-3">
-  <div>
-    <h1 class="page-title text-2xl font-bold text-ink">On-Demand AI Suggestions</h1>
-    {% if chooser %}
-    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Pick a brand to generate or review on-demand suggestions.</p>
-    {% else %}
-    <p class="text-sm mt-0.5" style="color:var(--ink-2)">
-      Ask the AI to re-evaluate one campaign right now, instead of waiting for the scheduled run.
-      Writes to its own table — never touches the scheduled Pending Actions data, and never pushes a live bid on its own.
-    </p>
-    {% endif %}
-  </div>
-  <div class="flex gap-3 flex-wrap">
-  {% if not chooser and channel == 'Blinkit' %}
-  <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
-    <span class="text-xs font-semibold px-3.5 py-2" style="background:var(--brand);color:#fff;">Bid suggestions</span>
-    <a href="{{ url_for('ondemand', brand=brand, channel=channel, view='keywords') }}" data-soft
-       class="text-xs font-semibold px-3.5 py-2" style="color:var(--ink-2);">New keywords</a>
-  </div>
-  {% endif %}
-  <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
-    {% for ch in channels %}
-    <a href="{{ url_for('ondemand', brand=brand, channel=ch) }}" data-soft
-       class="text-xs font-semibold px-3.5 py-2 transition"
-       style="{{ 'background:var(--brand);color:#fff;' if ch == channel else 'color:var(--ink-2);' }}">{{ ch }}</a>
-    {% endfor %}
-  </div>
-  </div>
+{% if chooser %}
+<div class="mb-7">
+  <div class="text-[11px] font-semibold uppercase tracking-[.14em] mb-1" style="color:var(--brand)">AI Agent</div>
+  <h1 class="page-title text-2xl font-bold text-ink">Pick a brand</h1>
 </div>
+{% else %}
+{% include "_agent_header.html" %}
+{% endif %}
 
 {% if chooser %}
 <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">

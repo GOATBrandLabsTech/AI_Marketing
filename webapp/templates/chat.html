@@ -1,12 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Agent Chat - Blinkit Control{% endblock %}
+{% block title %}AI Agent - Chat{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-7">
-  <div>
-    <h1 class="page-title text-2xl font-bold text-ink">Agent Chat</h1>
-    <p class="text-sm mt-0.5" style="color:var(--ink-2)">Ask about performance, past decisions, or campaign status. Read-only &mdash; nothing here changes a bid. To act on a recommendation, use Pending Actions.</p>
-  </div>
-</div>
+{% include "_agent_header.html" %}
 
 <div class="card overflow-hidden" style="height:70vh; display:flex;">
   <div class="w-56 shrink-0 border-r flex flex-col" style="border-color:var(--grid)">

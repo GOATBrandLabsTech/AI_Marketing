@@ -13,7 +13,7 @@ Every day this:
   4. ranks by searches and growth, and asks the AI whether each keyword really
      fits that product (one cheap call per brand);
   5. saves the survivors as PENDING ideas. A person accepts or rejects each
-     one (On-Demand AI page, New keywords tab); accepted ones are added to the
+     one (AI Agent page, New keywords tab); accepted ones are added to the
      campaign by the 2 pm push. Nothing is added without a person, Auto or not.
 """
 import json

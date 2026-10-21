@@ -1,23 +1,14 @@
 {% extends "base.html" %}
-{% block title %}New keywords - Blinkit Control{% endblock %}
+{% block title %}AI Agent - New keywords{% endblock %}
 {% block content %}
-<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
-  <div>
-    <h1 class="page-title text-2xl font-bold text-ink">New keyword ideas &middot; {{ brand }}</h1>
-    <p class="text-sm mt-0.5 max-w-3xl" style="color:var(--ink-2)">
-      Keywords Blinkit suggests for our products that no campaign targets yet, ranked by searches and how fast they are
-      growing (from the daily search snapshots), checked by the AI for fit. Products with no stock, other brands' names,
-      very broad one-word terms and occasions that have passed are left out. Accepting only queues a keyword: the
-      2 pm push adds it to the campaign at the bid shown. Nothing is added without you, even on Auto campaigns.
-    </p>
-  </div>
-  <div class="flex gap-3 flex-wrap items-center">
-    <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
-      <a href="{{ url_for('ondemand', brand=brand, channel=channel) }}" data-soft class="text-xs font-semibold px-3.5 py-2" style="color:var(--ink-2);">Bid suggestions</a>
-      <span class="text-xs font-semibold px-3.5 py-2" style="background:var(--brand);color:#fff;">New keywords</span>
-    </div>
-    <button id="findBtn" onclick="findNow()" class="text-white text-xs font-semibold rounded-lg px-3.5 py-2" style="background:var(--brand)">Find ideas now</button>
-  </div>
+{% include "_agent_header.html" %}
+<div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+  <p class="text-xs max-w-3xl" style="color:var(--ink-muted)">
+    Ranked by searches and how fast they are growing (daily search snapshots). Left out: products with no stock,
+    other brands' names, very broad one-word terms and occasions that have passed. Nothing is added without you,
+    even on Auto campaigns.
+  </p>
+  <button id="findBtn" onclick="findNow()" class="text-white text-xs font-semibold rounded-lg px-3.5 py-2" style="background:var(--brand)">Find ideas now</button>
 </div>
 
 {% set pending = ideas|selectattr('status', 'equalto', 'pending')|list %}
@@ -44,7 +35,7 @@
       <tbody>
         {% for i in pending %}
         <tr class="border-b" style="border-color:var(--grid)" id="idea-{{ i.id }}">
-          <td class="px-3 py-2 font-semibold">{{ i.keyword }}</td>
+          <td class="px-3 py-2 font-semibold whitespace-nowrap">{{ i.keyword }}</td>
           <td class="px-3 py-2 text-xs"><div class="truncate max-w-[200px]" title="{{ i.campaign_name or '' }}">{{ i.campaign_name or i.campaign_id }}</div><div style="color:var(--ink-muted)">#{{ i.campaign_id }}</div></td>
           <td class="px-3 py-2 text-xs"><div class="truncate max-w-[220px]" title="{{ i.product_name or '' }}">{{ i.product_name or i.product_id }}</div></td>
           <td class="px-3 py-2 text-right tabular" data-sort="{{ i.searches or 0 }}">{{ '{:,}'.format(i.searches or 0) }}</td>
