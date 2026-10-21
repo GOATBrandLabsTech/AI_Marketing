@@ -437,7 +437,11 @@ def _agent_counts(brand, bid_rows=None):
     """Numbers on the AI Agent tabs: suggestions and keyword ideas waiting for a person."""
     import keyword_ideas
     from db import get_engine
-    counts = {"keywords": sum(1 for i in keyword_ideas.list_ideas(get_engine(), brand) if i.get("status") == "pending")}
+    counts = {}
+    try:   # a badge must never take the page down (e.g. no database login)
+        counts["keywords"] = sum(1 for i in keyword_ideas.list_ideas(get_engine(), brand) if i.get("status") == "pending")
+    except Exception:
+        pass
     if bid_rows is not None:
         counts["bids"] = sum(1 for r in bid_rows if r.get("user_implemented") in (None, "")
                              and r.get("action") not in (None, "NO_CHANGE"))

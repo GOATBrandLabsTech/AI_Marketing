@@ -33,6 +33,8 @@ def test_saved_reply_shows_its_table_again(monkeypatch):
     monkeypatch.setattr(chat, "list_threads", lambda brand: [{"thread_id": "t1", "title": "x"}])
     monkeypatch.setattr(chat, "get_messages", lambda tid: msgs)
     monkeypatch.setattr(webapp.queries, "fetch_notes", lambda *a, **k: [])
+    import keyword_ideas
+    monkeypatch.setattr(keyword_ideas, "list_ideas", lambda engine, brand: [])
     c = webapp.app.test_client()
     with c.session_transaction() as s:
         s["authed"] = True
