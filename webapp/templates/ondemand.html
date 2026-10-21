@@ -13,12 +13,21 @@
     </p>
     {% endif %}
   </div>
+  <div class="flex gap-3 flex-wrap">
+  {% if not chooser and channel == 'Blinkit' %}
+  <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
+    <span class="text-xs font-semibold px-3.5 py-2" style="background:var(--brand);color:#fff;">Bid suggestions</span>
+    <a href="{{ url_for('ondemand', brand=brand, channel=channel, view='keywords') }}" data-soft
+       class="text-xs font-semibold px-3.5 py-2" style="color:var(--ink-2);">New keywords</a>
+  </div>
+  {% endif %}
   <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
     {% for ch in channels %}
     <a href="{{ url_for('ondemand', brand=brand, channel=ch) }}" data-soft
        class="text-xs font-semibold px-3.5 py-2 transition"
        style="{{ 'background:var(--brand);color:#fff;' if ch == channel else 'color:var(--ink-2);' }}">{{ ch }}</a>
     {% endfor %}
+  </div>
   </div>
 </div>
 

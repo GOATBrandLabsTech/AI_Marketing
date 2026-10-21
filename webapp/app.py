@@ -481,6 +481,12 @@ def ondemand():
         return render_template("ondemand.html", chooser=queries.fetch_brands(), active="ondemand",
                                 channel=channel, channels=CHANNELS)
 
+    if request.args.get("view") == "keywords":
+        import keyword_ideas
+        from db import get_engine
+        return render_template("keyword_ideas.html", ideas=keyword_ideas.list_ideas(get_engine(), brand),
+                               channel=channel, channels=CHANNELS, active="ondemand")
+
     campaign_filter = request.args.get("campaign_id") or None
     cfuncs = _channel_funcs(channel)
     campaigns = cfuncs["campaign_status"](brand)
@@ -505,6 +511,41 @@ def ondemand():
         channels=CHANNELS,
         active="ondemand",
     )
+
+
+@app.route("/api/keyword-ideas/<int:idea_id>/decide", methods=["POST"])
+@login_required
+def api_keyword_idea_decide(idea_id):
+    """Accept (optionally with a different starting bid) or reject one idea.
+    Accepting only queues it: the 2 pm push adds the keyword to the campaign."""
+    import keyword_ideas
+    from db import get_engine
+    payload = request.get_json(force=True) or {}
+    if not isinstance(payload.get("accept"), bool):
+        return jsonify({"error": "accept must be true or false"}), 400
+    cpm = payload.get("cpm")
+    if cpm not in (None, ""):
+        try:
+            cpm = float(cpm)
+        except (TypeError, ValueError):
+            return jsonify({"error": "bid must be a number"}), 400
+    else:
+        cpm = None
+    if not keyword_ideas.decide(get_engine(), idea_id, payload["accept"], cpm=cpm, by=current_brand()):
+        return jsonify({"error": "only a pending idea can be decided"}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/keyword-ideas/find", methods=["POST"])
+@login_required
+def api_keyword_ideas_find():
+    """Runs the daily idea finder for one brand now (one AI call)."""
+    import keyword_ideas
+    from db import get_engine
+    brand = (request.get_json(force=True) or {}).get("brand") or current_brand()
+    r = keyword_ideas.find_for_brand(get_engine(), brand)
+    return jsonify({"ok": True, "brand": brand, "added": r.get("added", 0), "refreshed": r.get("refreshed", 0),
+                    "candidates": r["candidates"], "relevant": r["relevant"]})
 
 
 @app.route("/api/campaigns/<campaign_id>/automation", methods=["POST"])

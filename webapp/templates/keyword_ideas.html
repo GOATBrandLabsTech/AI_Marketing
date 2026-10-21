@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}New keywords - Blinkit Control{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+  <div>
+    <h1 class="page-title text-2xl font-bold text-ink">New keyword ideas &middot; {{ brand }}</h1>
+    <p class="text-sm mt-0.5 max-w-3xl" style="color:var(--ink-2)">
+      Keywords Blinkit suggests for our products that no campaign targets yet, ranked by searches and how fast they are
+      growing (from the daily search snapshots), checked by the AI for fit. Products with no stock, other brands' names,
+      very broad one-word terms and occasions that have passed are left out. Accepting only queues a keyword: the
+      2 pm push adds it to the campaign at the bid shown. Nothing is added without you, even on Auto campaigns.
+    </p>
+  </div>
+  <div class="flex gap-3 flex-wrap items-center">
+    <div class="flex rounded-lg border overflow-hidden" style="border-color:var(--ring)">
+      <a href="{{ url_for('ondemand', brand=brand, channel=channel) }}" data-soft class="text-xs font-semibold px-3.5 py-2" style="color:var(--ink-2);">Bid suggestions</a>
+      <span class="text-xs font-semibold px-3.5 py-2" style="background:var(--brand);color:#fff;">New keywords</span>
+    </div>
+    <button id="findBtn" onclick="findNow()" class="text-white text-xs font-semibold rounded-lg px-3.5 py-2" style="background:var(--brand)">Find ideas now</button>
+  </div>
+</div>
+
+{% set pending = ideas|selectattr('status', 'equalto', 'pending')|list %}
+{% set others = ideas|rejectattr('status', 'equalto', 'pending')|list %}
+
+<div class="card overflow-hidden mb-6">
+  <div class="px-4 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wide" style="color:var(--ink-muted)">Waiting for you &middot; {{ pending|length }}</div>
+  <div class="overflow-x-auto">
+    <table class="data w-full text-sm" id="ideasTable">
+      <thead>
+        <tr class="text-left border-b" style="border-color:var(--grid)">
+          <th class="px-3 py-3" data-sortable>Keyword</th>
+          <th class="px-3 py-3" data-sortable>Campaign</th>
+          <th class="px-3 py-3" data-sortable>Product</th>
+          <th class="px-3 py-3 text-right" data-sortable>Searches</th>
+          <th class="px-3 py-3 text-right" data-sortable>7 days</th>
+          <th class="px-3 py-3 text-right" data-sortable>28 days</th>
+          <th class="px-3 py-3" data-sortable>Trend</th>
+          <th class="px-3 py-3">Why (AI)</th>
+          <th class="px-3 py-3 text-right">Start bid (Rs)</th>
+          <th class="px-3 py-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in pending %}
+        <tr class="border-b" style="border-color:var(--grid)" id="idea-{{ i.id }}">
+          <td class="px-3 py-2 font-semibold">{{ i.keyword }}</td>
+          <td class="px-3 py-2 text-xs"><div class="truncate max-w-[200px]" title="{{ i.campaign_name or '' }}">{{ i.campaign_name or i.campaign_id }}</div><div style="color:var(--ink-muted)">#{{ i.campaign_id }}</div></td>
+          <td class="px-3 py-2 text-xs"><div class="truncate max-w-[220px]" title="{{ i.product_name or '' }}">{{ i.product_name or i.product_id }}</div></td>
+          <td class="px-3 py-2 text-right tabular" data-sort="{{ i.searches or 0 }}">{{ '{:,}'.format(i.searches or 0) }}</td>
+          <td class="px-3 py-2 text-right tabular" data-sort="{{ i.growth_7d if i.growth_7d is not none else -999999 }}">{{ ('%+.0f%%'|format(i.growth_7d)) if i.growth_7d is not none else '-' }}</td>
+          <td class="px-3 py-2 text-right tabular" data-sort="{{ i.growth_28d if i.growth_28d is not none else -999999 }}">{{ ('%+.0f%%'|format(i.growth_28d)) if i.growth_28d is not none else '-' }}</td>
+          <td class="px-3 py-2 text-xs whitespace-nowrap">
+            <span class="badge" style="background:{{ '#e8f4ec' if 'Rising' in (i.trend or '') or i.trend == 'New' else '#fef3e2' if 'Falling' in (i.trend or '') else 'var(--plane)' }};color:{{ '#1f6b3a' if 'Rising' in (i.trend or '') or i.trend == 'New' else '#8a5a00' if 'Falling' in (i.trend or '') else 'var(--ink-2)' }}">{{ i.trend }}</span>
+          </td>
+          <td class="px-3 py-2 text-xs" style="color:var(--ink-2);max-width:260px">{{ i.ai_reason or '' }}</td>
+          <td class="px-3 py-2 text-right">
+            <input type="number" min="200" max="800" step="1" value="{{ i.suggested_cpm }}" class="w-20 rounded-lg border text-sm px-2 py-1 text-right" style="border-color:var(--ring)" id="cpm-{{ i.id }}">
+            {% if i.blinkit_cpm_range %}<div class="text-[10px] mt-0.5" style="color:var(--ink-muted)">Blinkit: {{ i.blinkit_cpm_range }}</div>{% endif %}
+          </td>
+          <td class="px-3 py-2 whitespace-nowrap">
+            <button class="text-xs font-semibold rounded-lg px-2.5 py-1 text-white" style="background:var(--good)" onclick='decide({{ i.id }}, true, {{ i.keyword|tojson }})'>Accept</button>
+            <button class="text-xs font-semibold rounded-lg px-2.5 py-1" style="color:var(--critical)" onclick='decide({{ i.id }}, false, {{ i.keyword|tojson }})'>Reject</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="px-4 py-10 text-center" style="color:var(--ink-muted)">No ideas waiting. The daily run (about 1:15 pm) adds new ones, or click "Find ideas now".</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if others %}
+<div class="card overflow-hidden">
+  <div class="px-4 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wide" style="color:var(--ink-muted)">Decided in the last 7 days</div>
+  <div class="overflow-x-auto">
+    <table class="data w-full text-sm">
+      <thead><tr class="text-left border-b" style="border-color:var(--grid)">
+        <th class="px-3 py-2">Keyword</th><th class="px-3 py-2">Campaign</th><th class="px-3 py-2 text-right">Bid</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">Note</th>
+      </tr></thead>
+      <tbody>
+        {% for i in others %}
+        <tr class="border-b" style="border-color:var(--grid)">
+          <td class="px-3 py-2">{{ i.keyword }}</td>
+          <td class="px-3 py-2 text-xs">{{ i.campaign_name or i.campaign_id }}</td>
+          <td class="px-3 py-2 text-right tabular">{{ i.suggested_cpm }}</td>
+          <td class="px-3 py-2 text-xs">
+            {% if i.status == 'accepted' %}<span class="badge" style="background:#fef3e2;color:#8a5a00">Accepted - goes out at 2 pm</span>
+            {% elif i.status == 'done' %}<span class="badge" style="background:#e8f4ec;color:#1f6b3a">Added to campaign</span>
+            {% elif i.status == 'failed' %}<span class="badge" style="background:#fbeaea;color:#9c2626">Push failed</span>
+            {% else %}<span class="badge" style="background:var(--plane);color:var(--ink-2)">Rejected</span>{% endif %}
+          </td>
+          <td class="px-3 py-2 text-xs" style="color:var(--ink-muted)">{{ i.push_note or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+initSortableTable('ideasTable');
+async function decide(id, accept, keyword) {
+  const box = document.getElementById('cpm-' + id);
+  const cpm = box ? box.value : null;
+  if (accept && !confirm(`Add "${keyword}" to this campaign at Rs ${cpm}? It goes to Blinkit with the 2 pm push.`)) return;
+  try {
+    await postJSON(`/api/keyword-ideas/${id}/decide`, { accept, cpm });
+    toast(accept ? 'Accepted - added at the 2 pm push' : 'Rejected', true);
+    const row = document.getElementById('idea-' + id);
+    if (row) row.remove();
+  } catch (e) { /* toast already shown */ }
+}
+async function findNow() {
+  const b = document.getElementById('findBtn');
+  b.disabled = true; b.textContent = 'Finding... (about a minute)';
+  try {
+    const r = await postJSON('/api/keyword-ideas/find', { brand: {{ brand|tojson }} });
+    toast(`${r.added} new idea(s), ${r.refreshed} refreshed`, true);
+    setTimeout(() => location.reload(), 800);
+  } catch (e) { b.disabled = false; b.textContent = 'Find ideas now'; }
+}
+</script>
+{% endblock %}
