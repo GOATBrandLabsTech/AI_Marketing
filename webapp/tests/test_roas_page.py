@@ -48,6 +48,8 @@ def client(monkeypatch):
     monkeypatch.setattr(queries, "fetch_ondemand_action_dates", lambda b: [str(CUT)])
     monkeypatch.setattr(queries, "fetch_ondemand_roas_impact", lambda *a, **k: [])
     monkeypatch.setattr(queries, "fetch_ai_managed_campaign_ids", lambda b: [111, 222, 333])
+    monkeypatch.setattr(queries, "fetch_stopped_campaign_ids", lambda ids: [])
+    monkeypatch.setattr(queries, "AI_MILESTONES", {})      # these tests use the action-date default
 
     def channel_daily(brand, days=180, campaign_ids=None, exclude_ids=None):
         seen.setdefault("calls", []).append({"ids": campaign_ids, "exclude": exclude_ids})
@@ -152,3 +154,36 @@ def test_metric_cards_with_checkboxes_and_range_picker(client):
         assert f'type="checkbox" data-metric="{key}"' in html
     assert 'name="range"' in html and 'value="this_month" selected' in html
     assert "Quantity sold" in html and "Budget spent" in html
+
+
+def test_stopped_campaigns_are_not_offered_nor_counted_as_others(client, monkeypatch):
+    monkeypatch.setattr(queries, "fetch_stopped_campaign_ids", lambda ids: [333])
+    html = client.get("/roas?brand=Chumbak&scope=ai").get_data(as_text=True)
+    assert client.seen["scoreboard_ids"] == [111, 222]
+    assert "Not counted: 1 stopped AI campaign(s) (333)" in html
+    others = [c for c in client.seen["calls"] if c["exclude"]]
+    assert others and others[-1]["exclude"] == [111, 222, 333]      # still kept out of "other campaigns"
+
+
+def test_cards_compare_per_day_around_the_action_date(client):
+    html = client.get(f"/roas?brand=Chumbak&scope=ai&cutover={CUT}&window_days=7").get_data(as_text=True)
+    assert "Before vs after" in html and "Budget spent / day" in html and "after vs before" in html
+    assert "grey band = before window" in html and "How to read this page" in html
+
+
+def test_go_live_is_the_default_action_date(client, monkeypatch):
+    from datetime import date as _d
+    monkeypatch.setattr(queries, "AI_MILESTONES", {"Chumbak": [(CUT, "AI decisions start")]})
+    monkeypatch.setattr(queries, "fetch_ondemand_action_dates", lambda b: [str(TODAY - timedelta(days=2))])
+    html = client.get("/roas?brand=Chumbak&scope=ai").get_data(as_text=True)
+    assert f'value="{CUT}" selected' in html
+
+
+def test_per_day_compare_handles_unequal_windows():
+    ba = {"before": {"days": 7, "spend": 700.0, "sales": 2800.0, "impressions": 7000, "atc": 70, "units": 14,
+                     "roas": 4.0, "ctr": 1.0, "cpm": 100.0},
+          "after": {"days": 2, "spend": 300.0, "sales": 1500.0, "impressions": 2000, "atc": 30, "units": 6,
+                    "roas": 5.0, "ctr": 1.5, "cpm": 150.0}}
+    c = queries.cutover_compare(ba)
+    assert c["spend"]["before"] == 100 and c["spend"]["after"] == 150 and c["spend"]["pct"] == 50.0
+    assert c["roas"]["pct"] == 25.0 and c["cpm"]["pct"] == 50.0

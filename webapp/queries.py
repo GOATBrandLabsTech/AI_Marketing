@@ -771,18 +771,65 @@ def fetch_campaign_roas_daily(brand, campaign_ids, days=30):
 # Chumbak trial ran in the old pipeline (Blinkit_actions_llm), so 10 Sep is not
 # among the on-demand action dates; Voylla's pilot was switched on 18 Sep.
 AI_MILESTONES = {
-    "Chumbak": [(date(2026, 9, 10), "AI trial start (12 campaigns)"), (date(2026, 10, 12), "Daily Auto start")],
-    "Voylla": [(date(2026, 9, 18), "AI pilot start (Mumbai campaign)")],
+    "Chumbak": [(date(2026, 9, 10), "AI decisions start (before = traditional bidding)"),
+                (date(2026, 10, 12), "Daily Auto starts (607078 from 8 Oct)")],
+    "Voylla": [(date(2026, 9, 18), "Daily Auto starts (Mumbai pilot)")],
 }
 
-RANGE_PRESETS = {"7": "Last 7 days", "15": "Last 15 days", "30": "Last 30 days", "90": "Last 90 days",
+ADDITIVE_METRICS = ("spend", "impressions", "atc", "units", "sales")
+RATIO_METRICS = ("roas", "ctr", "cpm")
+
+
+def cutover_compare(before_after):
+    """Before vs after the action date, metric by metric. Counts are compared
+    PER DAY (the after window may still be filling, and BAU view can drop event
+    days from either side); ratios are compared as they are. Returns
+    {metric: {"before", "after", "pct"}}."""
+    b, a = before_after["before"], before_after["after"]
+    out = {}
+    for k in ADDITIVE_METRICS + RATIO_METRICS:
+        if k in ADDITIVE_METRICS:
+            bv = (b.get(k) or 0) / b["days"] if b.get("days") else None
+            av = (a.get(k) or 0) / a["days"] if a.get("days") else None
+        else:
+            bv, av = b.get(k), a.get(k)
+        pct = round((av / bv - 1) * 100, 1) if bv and av is not None else None
+        out[k] = {"before": bv, "after": av, "pct": pct}
+    return out
+
+
+def cutover_windows(cutover_date, window_days, today):
+    """The exact dates each side covers (the after side stops at yesterday)."""
+    yesterday = today - timedelta(days=1)
+    return {"before_start": cutover_date - timedelta(days=window_days), "before_end": cutover_date - timedelta(days=1),
+            "after_start": cutover_date, "after_end": min(cutover_date + timedelta(days=window_days - 1), yesterday)}
+
+
+def fetch_stopped_campaign_ids(campaign_ids):
+    """Of these campaigns, the ones whose latest runtime status is STOPPED."""
+    if not campaign_ids:
+        return []
+    with get_cursor() as cur:
+        cur.execute(
+            """SELECT campaign_id::text AS cid FROM (
+                   SELECT DISTINCT ON (campaign_id) campaign_id, last_status FROM voylla."Blinkit_Campaign_Runtime"
+                   WHERE campaign_id::text = ANY(%(ids)s) ORDER BY campaign_id, log_date DESC) x
+               WHERE last_status = 'STOPPED'""",
+            {"ids": [str(i) for i in campaign_ids]},
+        )
+        return sorted(int(r["cid"]) for r in cur.fetchall())
+
+RANGE_PRESETS = {"around": "Around the action date", "7": "Last 7 days", "15": "Last 15 days", "30": "Last 30 days", "90": "Last 90 days",
                  "this_month": "This month", "last_month": "Last month", "custom": "Custom"}
 
 
-def resolve_range(preset, start_arg, end_arg, today):
-    """(preset, start, end) for the trend's date range, inclusive. Unknown or
-    incomplete input falls back to the last 30 days."""
+def resolve_range(preset, start_arg, end_arg, today, cutover_date=None):
+    """(preset, start, end) for the trend's date range, inclusive. Default:
+    30 days either side of the action date (up to yesterday). Unknown or
+    incomplete input falls back to that."""
     yesterday = today - timedelta(days=1)
+    if (preset in (None, "", "around")) and cutover_date:
+        return "around", cutover_date - timedelta(days=30), min(cutover_date + timedelta(days=30), yesterday)
     if preset == "custom":
         try:
             start, end = date.fromisoformat(start_arg), date.fromisoformat(end_arg)
@@ -923,6 +970,7 @@ def channel_before_after(daily, cutover_date, window_days=7):
             "roas": round(sales / spend, 2) if spend else None,
             "days": len(rows),
             "atc": sum(r["atc"] for r in rows),
+            "units": sum(r.get("units") or 0 for r in rows),
             "new_users": sum(r["new_users"] for r in rows),
             "impressions": impressions,
             # CTR = add to carts / impressions (Blinkit reports no clicks), as the bid engine uses

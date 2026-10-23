@@ -79,7 +79,13 @@
         </form>
       </details>
       {% endif %}
-      {% if channel.decisions_on_cutover == 0 %}
+      {% if channel.stopped_ids %}
+      <div class="mt-2 text-[11px] max-w-2xl" style="color:#7d93b5">
+        Not counted: {{ channel.stopped_ids|length }} stopped AI campaign(s) ({{ channel.stopped_ids|join(', ') }}). They are left out of the AI side
+        and are not added to "other campaigns" either.
+      </div>
+      {% endif %}
+      {% if channel.decisions_on_cutover == 0 and channel.cutover_date not in (milestones|map('first')|list) %}
       <div class="mt-3 max-w-2xl text-xs rounded-lg px-3 py-2" style="background:rgba(240,180,60,.15); color:#f5c975; border:1px solid rgba(240,180,60,.3);">
         <strong>Heads up:</strong> nobody accepted or overridden anything on {{ channel.cutover_date }} for {{ brand }} —
         every recommendation from that date is still undecided. The before/after split below reflects the channel's
@@ -88,6 +94,32 @@
       {% endif %}
     </div>
   </div>
+
+  <details class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
+    <summary class="cursor-pointer text-sm font-semibold text-white">How to read this page</summary>
+    <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 mt-3 text-xs leading-relaxed" style="color:#c7d5ea">
+      <div><b class="text-white">The action date (cutover)</b> is the line everything is measured from: the AI go-live
+        (Chumbak 10 Sep, Voylla 18 Sep) or any day the AI made decisions. <b>Before</b> = the N days up to the day before it;
+        <b>After</b> = from that day for N days (stopping at yesterday). N is the compare window.</div>
+      <div><b class="text-white">The cards</b> show both sides for the same campaigns. Counts (spend, impressions, add to carts,
+        quantity, sales) are compared <b>per day</b>, because the after side may still be filling up and the BAU view can drop
+        event days from either side. ROAS, CTR and CPM are compared as they are.</div>
+      <div><b class="text-white">The %</b> = (after &divide; before &minus; 1). Green = better, red = worse; for CPM lower is better;
+        spend is never coloured, because spending more or less is a choice, not a result.</div>
+      <div><b class="text-white">Other campaigns</b> = every keyword campaign of the brand the AI has never run, over the same days.
+        A festival or a budget cut moves both; the gap between the two lines is what the AI changed.</div>
+      <div><b class="text-white">Days: BAU only</b> leaves out marked event days (Raksha Bandhan, Navratri ...); "All days" puts them back.
+        The Event days panel lists them.</div>
+      <div><b class="text-white">The chart</b> shows the date range you pick (default: 30 days either side of the action date).
+        The grey band is the before window, the coloured band the after window, the line the action date. &#9650; = days the AI
+        pushed bid changes (from 18 Sep; the September trial rounds went through the old system and are not marked).</div>
+      <div><b class="text-white">Campaign by campaign</b> = the same before/after for each campaign, with the bids the AI pushed in the
+        after window. Click a column header to sort.</div>
+      <div><b class="text-white">Data</b> = Blinkit keyword ads (Blinkit_Ads_Report), checked against Blinkit's own download on 23 Oct:
+        spend matches to the rupee. Recommendation and banner ads are not in it. Blinkit keeps adding sales to the last ~3 days, so
+        those are provisional. (Blinkit's own Excel repeats the 1st of each month - do not compare against it without removing those rows.)</div>
+    </div>
+  </details>
 
   <form method="get" data-soft class="flex flex-wrap items-end gap-3 mb-4">
     <input type="hidden" name="brand" value="{{ brand }}">
@@ -204,32 +236,36 @@
 
   <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
     {% set t, vp = channel.totals, channel.vs_prev %}
+    {% set w, cmp = channel.windows, channel.compare %}
     <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-      <div class="text-sm font-semibold text-white">Trends &middot; {{ channel.range.start.strftime('%d %b') }} &ndash; {{ channel.range.end.strftime('%d %b %Y') }} <span class="font-normal" style="color:#7d93b5">({{ channel.range.days }} days)</span></div>
-      <div class="text-[11px]" style="color:#7d93b5">Tick any cards to draw them. % = change vs the {{ channel.range.days }} days before.</div>
+      <div class="text-sm font-semibold text-white">Before vs after {{ channel.cutover_date.strftime('%d %b %Y') }}
+        <span class="font-normal" style="color:#9fb3d1">&middot; Before {{ w.before_start.strftime('%d %b') }} &ndash; {{ w.before_end.strftime('%d %b') }}
+        ({{ channel.before_after.before.days }} day{{ 's' if channel.before_after.before.days != 1 }} counted)
+        &middot; After {{ w.after_start.strftime('%d %b') }} &ndash; {{ w.after_end.strftime('%d %b') }}
+        ({{ channel.before_after.after.days }} day{{ 's' if channel.before_after.after.days != 1 }} counted)
+        &middot; {{ {'bau': 'BAU days', 'event': 'event days', 'all': 'all days'}[channel.days_mode] }}</span></div>
+      <div class="text-[11px]" style="color:#7d93b5">Counts are per day. % = after vs before. Tick cards to draw them below.</div>
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 mb-4" role="group" aria-label="Metrics to draw">
-      {% for key, label, val in [
-          ('spend', 'Budget spent', '&#8377;{:,.0f}'.format(t.spend)),
-          ('impressions', 'Impressions', '{:,}'.format(t.impressions)),
-          ('atc', 'Add to carts', '{:,}'.format(t.atc)),
-          ('units', 'Quantity sold', '{:,}'.format(t.units)),
-          ('sales', 'Sales', '&#8377;{:,.0f}'.format(t.sales)),
-          ('roas', 'ROAS', t.roas if t.roas is not none else '-'),
-          ('ctr', 'CTR', ('%.2f%%'|format(t.ctr)) if t.ctr is not none else '-'),
-          ('cpm', 'CPM', ('&#8377;%.0f'|format(t.cpm)) if t.cpm is not none else '-')] %}
-      {% set pct = vp[key] %}
+      {% macro fmtv(key, v) %}{% if v is none %}-{% elif key in ('spend', 'sales') %}&#8377;{{ '{:,.0f}'.format(v) }}{% elif key == 'cpm' %}&#8377;{{ '%.0f'|format(v) }}{% elif key == 'ctr' %}{{ '%.2f%%'|format(v) }}{% elif key == 'roas' %}{{ '%.2f'|format(v) }}{% else %}{{ '{:,.0f}'.format(v) }}{% endif %}{% endmacro %}
+      {% for key, label in [('spend', 'Budget spent / day'), ('impressions', 'Impressions / day'), ('atc', 'Add to carts / day'),
+                            ('units', 'Quantity sold / day'), ('sales', 'Sales / day'), ('roas', 'ROAS'), ('ctr', 'CTR'), ('cpm', 'CPM')] %}
+      {% set c = cmp[key] %}
+      {% set val = fmtv(key, c.after) %}
+      {% set pct = c.pct %}
       {% set good = pct is not none and ((pct > 0) != (key == 'cpm')) %}
       <label class="metric-card rounded-xl p-3 cursor-pointer block" data-card="{{ key }}" style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1)">
         <span class="flex items-center justify-between gap-2">
           <span class="text-[11px] font-semibold" style="color:#9fb3d1">{{ label }}</span>
           <input type="checkbox" data-metric="{{ key }}" class="w-4 h-4" aria-label="Draw {{ label }}">
         </span>
-        <span class="block font-display text-lg font-bold text-white mt-1 tabular">{{ val|safe }}</span>
-        <span class="block text-[11px] tabular" style="color: {{ '#7d93b5' if pct is none or key == 'spend' or (pct|abs) < 1 else ('#3ddc6a' if good else '#ff8a80') }}">{{ ('%+.0f%%'|format(pct)) if pct is not none else 'no earlier data' }}</span>
+        <span class="block font-display text-lg font-bold text-white mt-1 tabular">{{ val }}</span>
+        <span class="block text-[11px] tabular" style="color:#9fb3d1">before {{ fmtv(key, c.before) }}</span>
+        <span class="block text-[11px] tabular font-semibold" style="color: {{ '#7d93b5' if pct is none or key == 'spend' or (pct|abs) < 1 else ('#3ddc6a' if good else '#ff8a80') }}">{{ ('%+.0f%% after vs before'|format(pct)) if pct is not none else 'no before data' }}</span>
       </label>
       {% endfor %}
     </div>
+    <div class="text-[11px] mb-1" style="color:#7d93b5">Chart: {{ channel.range.start.strftime('%d %b') }} &ndash; {{ channel.range.end.strftime('%d %b %Y') }} &middot; grey band = before window, coloured band = after window, line = {{ channel.cutover_date.strftime('%d %b') }}</div>
     <div style="height:280px"><canvas id="channelChart"></canvas></div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] mt-2" style="color:#9fb3d1">
       <span>Each ticked card is one line, on its own scale (the first two show their axis)</span>
@@ -564,6 +600,28 @@
 const trend = {{ channel.trend|tojson }};
 const cutoverLabel = {{ channel.cutover_label|tojson }};
 const isDayView = {{ (channel.granularity == 'day')|tojson }};
+const WINDOWS = {{ {'bs': channel.windows.before_start|string, 'be': channel.windows.before_end|string,
+                    'as': channel.windows.after_start|string, 'ae': channel.windows.after_end|string}|tojson }};
+// grey band = before window, coloured band = after window, solid line = action date (day view only)
+const cutoverBands = {
+  id: 'cutoverBands',
+  beforeDatasetsDraw(c) {
+    if (!isDayView) return;
+    const labels = c.data.labels, x = c.scales.x, area = c.chartArea, ctx = c.ctx;
+    const px = (from, to) => {
+      const i = labels.findIndex(l => l >= from), j = labels.length - 1 - [...labels].reverse().findIndex(l => l <= to);
+      if (i < 0 || j < i || j >= labels.length) return null;
+      const half = labels.length > 1 ? (x.getPixelForValue(1) - x.getPixelForValue(0)) / 2 : 10;
+      return [x.getPixelForValue(i) - half, x.getPixelForValue(j) + half];
+    };
+    ctx.save();
+    const b = px(WINDOWS.bs, WINDOWS.be), a = px(WINDOWS.as, WINDOWS.ae);
+    if (b) { ctx.fillStyle = 'rgba(159,179,209,.10)'; ctx.fillRect(b[0], area.top, b[1] - b[0], area.bottom - area.top); }
+    if (a) { ctx.fillStyle = 'rgba(61,135,229,.13)'; ctx.fillRect(a[0], area.top, a[1] - a[0], area.bottom - area.top);
+             ctx.strokeStyle = '#f2a65a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(a[0], area.top); ctx.lineTo(a[0], area.bottom); ctx.stroke(); }
+    ctx.restore();
+  },
+};
 const EVENT_BRAND = {{ brand|tojson }};
 async function addEvent(ev) {
   ev.preventDefault();
@@ -671,6 +729,7 @@ function draw() {
     },
   };
   if (chart) chart.destroy();
+  cfg.plugins = (cfg.plugins || []).concat([cutoverBands]);
   chart = new Chart(document.getElementById('channelChart'), cfg);
   document.querySelectorAll('[data-card]').forEach(c => {
     const on = keys.includes(c.dataset.card), col = METRICS[c.dataset.card].color;
