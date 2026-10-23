@@ -168,7 +168,7 @@ def test_stopped_campaigns_are_not_offered_nor_counted_as_others(client, monkeyp
 def test_cards_compare_per_day_around_the_action_date(client):
     html = client.get(f"/roas?brand=Chumbak&scope=ai&cutover={CUT}&window_days=7").get_data(as_text=True)
     # cards = the picked date range vs the days just before it; before/after = the action date, per day
-    for phrase in ("Date range", "Budget spent", "Before vs after the action date", "Per day", "How to read this page"):
+    for phrase in ("Date range", "Budget spent", "Before vs after the action date", "average per day", "total of", "The action date does not change the cards", "How to read this page"):
         assert phrase in html, phrase
 
 
