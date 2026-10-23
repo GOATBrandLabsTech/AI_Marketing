@@ -73,3 +73,27 @@ def test_page_defaults_to_bau_and_says_what_was_left_out(monkeypatch):
     html = c.get("/roas?brand=Voylla").get_data(as_text=True)
     assert "Showing BAU (normal) days only" in html and "Raksha Bandhan" in html
     assert "Showing all days" in c.get("/roas?brand=Voylla&days=all").get_data(as_text=True)
+
+
+def test_cutover_picker_offers_ai_go_live_dates(monkeypatch):
+    import app as webapp
+    import queries
+    import db
+    monkeypatch.setattr(db, "get_engine", lambda: None)
+    monkeypatch.setattr(ev, "list_events", lambda engine, brand: [])
+    today = date.today()
+    daily = [{"date": today - timedelta(days=i), "spend": 100.0, "sales": 500.0, "impressions": 1000, "atc": 10,
+              "units": 5, "new_users": 1, "avg_position": 3.0} for i in range(1, 60)]
+    monkeypatch.setattr(queries, "fetch_ondemand_action_dates", lambda b: ["2026-10-12", "2026-09-18"])
+    monkeypatch.setattr(queries, "fetch_ondemand_roas_impact", lambda *a, **k: [])
+    monkeypatch.setattr(queries, "fetch_ai_managed_campaign_ids", lambda b: [])
+    monkeypatch.setattr(queries, "fetch_channel_daily", lambda *a, **k: daily)
+    monkeypatch.setattr(queries, "fetch_push_counts", lambda *a, **k: {})
+    monkeypatch.setattr(queries, "fetch_ai_campaign_options", lambda *a, **k: [])
+    monkeypatch.setattr(queries, "count_ondemand_decisions_on_date", lambda *a: 0)
+    c = webapp.app.test_client()
+    with c.session_transaction() as s:
+        s["authed"] = True
+    html = c.get("/roas?brand=Chumbak&cutover=2026-09-10").get_data(as_text=True)
+    assert "AI trial start (12 campaigns)" in html and 'value="2026-09-10" selected' in html
+    assert html.count('value="2026-10-12"') == 1          # the milestone is not listed twice
