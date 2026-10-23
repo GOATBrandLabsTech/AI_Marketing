@@ -321,7 +321,9 @@ def roas():
         search=search,
         brand_summary=brand_summary,
         channel=channel,
-        action_dates=action_dates,
+        action_dates=[d for d in action_dates
+                      if d not in {str(m) for m, _ in queries.AI_MILESTONES.get(brand, [])}],
+        milestones=queries.AI_MILESTONES.get(brand, []),
         verdict_after_days=queries.VERDICT_AFTER_DAYS,
         verdict_settle_days=queries.VERDICT_SETTLE_DAYS,
         active="roas",

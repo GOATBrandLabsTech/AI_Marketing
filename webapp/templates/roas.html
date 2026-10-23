@@ -116,9 +116,18 @@
     <div>
       <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Action date (cutover)</label>
       <select name="cutover" onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+        {% if milestones %}
+        <optgroup label="AI go-live" style="color:#111">
+          {% for d, label in milestones %}
+          <option value="{{ d }}" {{ 'selected' if d|string == channel.cutover_date|string else '' }} style="color:#111">{{ d.strftime('%d %b %Y') }} &middot; {{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        <optgroup label="AI decision dates" style="color:#111">
+        {% endif %}
         {% for d in action_dates %}
         <option value="{{ d }}" {{ 'selected' if d == channel.cutover_date|string else '' }} style="color:#111">{{ d }}</option>
         {% endfor %}
+        {% if milestones %}</optgroup>{% endif %}
       </select>
     </div>
     <div>

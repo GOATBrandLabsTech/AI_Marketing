@@ -767,6 +767,14 @@ def fetch_campaign_roas_daily(brand, campaign_ids, days=30):
     return {cid: [vals.get(d) for d in days_list] for cid, vals in by_cid.items()}
 
 
+# When the AI started, per brand - offered first in the cutover picker. The
+# Chumbak trial ran in the old pipeline (Blinkit_actions_llm), so 10 Sep is not
+# among the on-demand action dates; Voylla's pilot was switched on 18 Sep.
+AI_MILESTONES = {
+    "Chumbak": [(date(2026, 9, 10), "AI trial start (12 campaigns)"), (date(2026, 10, 12), "Daily Auto start")],
+    "Voylla": [(date(2026, 9, 18), "AI pilot start (Mumbai campaign)")],
+}
+
 RANGE_PRESETS = {"7": "Last 7 days", "15": "Last 15 days", "30": "Last 30 days", "90": "Last 90 days",
                  "this_month": "This month", "last_month": "Last month", "custom": "Custom"}
 
