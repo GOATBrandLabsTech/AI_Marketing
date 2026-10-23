@@ -62,7 +62,7 @@ def client(monkeypatch):
         {"cid": "333", "name": "Mugs", "status": "STOPPED", "auto": False}])
     monkeypatch.setattr(queries, "count_ondemand_decisions_on_date", lambda b, d: 4)
 
-    def scoreboard(brand, ids, cut, window):
+    def scoreboard(brand, ids, cut, window, **kw):
         seen["scoreboard_ids"] = ids
         return [{"cid": str(i), "name": f"C{i}", "mode": "auto", "raised": 1, "cut": 0, "paused": 0,
                  "spend_before": 100.0, "spend_after": 100.0, "roas_before": 4.0, "roas_after": 5.0,
