@@ -83,7 +83,7 @@ def test_picker_lists_ai_campaigns_and_defaults_to_all(client):
     assert "Campaigns: all 3" in html and 'value="333"' in html and "Only Auto" in html
     assert client.seen["scoreboard_ids"] == [111, 222, 333]
     assert "<polyline" in html                       # sparkline for 111
-    assert "Other campaigns over the same days" in html
+    assert "Same days, other campaigns" in html
 
 
 def test_selection_scopes_chart_and_scoreboard(client):
@@ -167,8 +167,9 @@ def test_stopped_campaigns_are_not_offered_nor_counted_as_others(client, monkeyp
 
 def test_cards_compare_per_day_around_the_action_date(client):
     html = client.get(f"/roas?brand=Chumbak&scope=ai&cutover={CUT}&window_days=7").get_data(as_text=True)
-    assert "Before vs after" in html and "Budget spent / day" in html and "after vs before" in html
-    assert "grey band = before window" in html and "How to read this page" in html
+    # cards = the picked date range vs the days just before it; before/after = the action date, per day
+    for phrase in ("Date range", "Budget spent", "Before vs after the action date", "Per day", "How to read this page"):
+        assert phrase in html, phrase
 
 
 def test_go_live_is_the_default_action_date(client, monkeypatch):
@@ -176,7 +177,7 @@ def test_go_live_is_the_default_action_date(client, monkeypatch):
     monkeypatch.setattr(queries, "AI_MILESTONES", {"Chumbak": [(CUT, "AI decisions start")]})
     monkeypatch.setattr(queries, "fetch_ondemand_action_dates", lambda b: [str(TODAY - timedelta(days=2))])
     html = client.get("/roas?brand=Chumbak&scope=ai").get_data(as_text=True)
-    assert f'value="{CUT}" selected' in html
+    assert f'name="cutover" value="{CUT}"' in html
 
 
 def test_per_day_compare_handles_unequal_windows():
@@ -187,3 +188,9 @@ def test_per_day_compare_handles_unequal_windows():
     c = queries.cutover_compare(ba)
     assert c["spend"]["before"] == 100 and c["spend"]["after"] == 150 and c["spend"]["pct"] == 50.0
     assert c["roas"]["pct"] == 25.0 and c["cpm"]["pct"] == 50.0
+
+
+def test_cards_follow_the_date_range_not_the_action_date(client):
+    html = client.get(f"/roas?brand=Chumbak&scope=ai&cutover={CUT}&range=custom&from={TODAY - timedelta(days=10)}&to={TODAY - timedelta(days=2)}").get_data(as_text=True)
+    assert f"Date range &middot; {(TODAY - timedelta(days=10)).strftime('%d %b')}" in html
+    assert "(9 days," in html                                # the range the user picked, whatever the action date

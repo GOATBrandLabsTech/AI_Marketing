@@ -95,5 +95,5 @@ def test_cutover_picker_offers_ai_go_live_dates(monkeypatch):
     with c.session_transaction() as s:
         s["authed"] = True
     html = c.get("/roas?brand=Chumbak&cutover=2026-09-10").get_data(as_text=True)
-    assert "AI decisions start (before = traditional bidding)" in html and 'value="2026-09-10" selected' in html
-    assert html.count('value="2026-10-12"') == 1          # the milestone is not listed twice
+    assert "AI decisions start (before = traditional bidding)" in html and 'name="cutover" value="2026-09-10"' in html
+    assert 'type="date" name="cutover"' in html            # any date can be picked, not only the listed ones

@@ -292,6 +292,9 @@ def roas():
                       "presets": queries.RANGE_PRESETS},
             "totals": totals,
             "vs_prev": queries.compare_totals(totals, prev_totals),
+            "prev_totals": prev_totals,
+            "prev_range": {"start": chart_start - timedelta(days=span), "end": chart_start - timedelta(days=1)},
+            "yesterday": date.today() - timedelta(days=1),
             "before_after": before_after,
             "others_before_after": (queries.channel_before_after(daily_others, cutover_date, window_days)
                                     if daily_others else None),
