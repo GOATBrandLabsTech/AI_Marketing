@@ -146,21 +146,24 @@
       <button class="text-xs font-semibold rounded-lg px-3 py-1.5 text-white" style="background:var(--brand)">Apply</button>
     </div>
     <div>
-      <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Action date (cutover)</label>
-      <select name="cutover" onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
-        {% if milestones %}
-        <optgroup label="AI go-live" style="color:#111">
-          {% for d, label in milestones %}
-          <option value="{{ d }}" {{ 'selected' if d|string == channel.cutover_date|string else '' }} style="color:#111">{{ d.strftime('%d %b %Y') }} &middot; {{ label }}</option>
-          {% endfor %}
-        </optgroup>
-        <optgroup label="AI decision dates" style="color:#111">
-        {% endif %}
-        {% for d in action_dates %}
-        <option value="{{ d }}" {{ 'selected' if d == channel.cutover_date|string else '' }} style="color:#111">{{ d }}</option>
-        {% endfor %}
-        {% if milestones %}</optgroup>{% endif %}
-      </select>
+      <label for="cutoverDate" class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Action date (cutover) &middot; any date</label>
+      <div class="flex gap-2">
+        <input id="cutoverDate" type="date" name="cutover" value="{{ channel.cutover_date }}" max="{{ channel.yesterday }}"
+               onchange="this.form.requestSubmit()" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15); color-scheme:dark">
+        <select aria-label="Quick pick an action date" onchange="if (this.value) { this.form.cutover.value = this.value; this.form.requestSubmit(); }" class="rounded-lg text-sm px-2.5 py-1.5 border" style="background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.15)">
+          <option value="" style="color:#111">Quick pick&hellip;</option>
+          {% if milestones %}
+          <optgroup label="AI go-live" style="color:#111">
+            {% for d, label in milestones %}
+            <option value="{{ d }}" style="color:#111">{{ d.strftime('%d %b %Y') }} &middot; {{ label }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
+          <optgroup label="Days the AI made decisions" style="color:#111">
+            {% for d in action_dates %}<option value="{{ d }}" style="color:#111">{{ d }}</option>{% endfor %}
+          </optgroup>
+        </select>
+      </div>
     </div>
     <div>
       <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Compare window</label>
@@ -236,36 +239,30 @@
 
   <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
     {% set t, vp = channel.totals, channel.vs_prev %}
-    {% set w, cmp = channel.windows, channel.compare %}
+    {% set pr = channel.prev_range %}
     <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-      <div class="text-sm font-semibold text-white">Before vs after {{ channel.cutover_date.strftime('%d %b %Y') }}
-        <span class="font-normal" style="color:#9fb3d1">&middot; Before {{ w.before_start.strftime('%d %b') }} &ndash; {{ w.before_end.strftime('%d %b') }}
-        ({{ channel.before_after.before.days }} day{{ 's' if channel.before_after.before.days != 1 }} counted)
-        &middot; After {{ w.after_start.strftime('%d %b') }} &ndash; {{ w.after_end.strftime('%d %b') }}
-        ({{ channel.before_after.after.days }} day{{ 's' if channel.before_after.after.days != 1 }} counted)
-        &middot; {{ {'bau': 'BAU days', 'event': 'event days', 'all': 'all days'}[channel.days_mode] }}</span></div>
-      <div class="text-[11px]" style="color:#7d93b5">Counts are per day. % = after vs before. Tick cards to draw them below.</div>
+      <div class="text-sm font-semibold text-white">Date range &middot; {{ channel.range.start.strftime('%d %b') }} &ndash; {{ channel.range.end.strftime('%d %b %Y') }}
+        <span class="font-normal" style="color:#9fb3d1">({{ channel.range.days }} days, {{ t.days }} counted &middot; {{ {'bau': 'BAU days', 'event': 'event days', 'all': 'all days'}[channel.days_mode] }})</span></div>
+      <div class="text-[11px]" style="color:#7d93b5">Totals for the date range you picked. % = vs the {{ channel.range.days }} days just before it ({{ pr.start.strftime('%d %b') }} &ndash; {{ pr.end.strftime('%d %b') }}). Tick cards to draw them.</div>
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 mb-4" role="group" aria-label="Metrics to draw">
       {% macro fmtv(key, v) %}{% if v is none %}-{% elif key in ('spend', 'sales') %}&#8377;{{ '{:,.0f}'.format(v) }}{% elif key == 'cpm' %}&#8377;{{ '%.0f'|format(v) }}{% elif key == 'ctr' %}{{ '%.2f%%'|format(v) }}{% elif key == 'roas' %}{{ '%.2f'|format(v) }}{% else %}{{ '{:,.0f}'.format(v) }}{% endif %}{% endmacro %}
-      {% for key, label in [('spend', 'Budget spent / day'), ('impressions', 'Impressions / day'), ('atc', 'Add to carts / day'),
-                            ('units', 'Quantity sold / day'), ('sales', 'Sales / day'), ('roas', 'ROAS'), ('ctr', 'CTR'), ('cpm', 'CPM')] %}
-      {% set c = cmp[key] %}
-      {% set val = fmtv(key, c.after) %}
-      {% set pct = c.pct %}
+      {% for key, label in [('spend', 'Budget spent'), ('impressions', 'Impressions'), ('atc', 'Add to carts'), ('units', 'Quantity sold'),
+                            ('sales', 'Sales'), ('roas', 'ROAS'), ('ctr', 'CTR'), ('cpm', 'CPM')] %}
+      {% set pct = vp[key] %}
       {% set good = pct is not none and ((pct > 0) != (key == 'cpm')) %}
       <label class="metric-card rounded-xl p-3 cursor-pointer block" data-card="{{ key }}" style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1)">
         <span class="flex items-center justify-between gap-2">
           <span class="text-[11px] font-semibold" style="color:#9fb3d1">{{ label }}</span>
           <input type="checkbox" data-metric="{{ key }}" class="w-4 h-4" aria-label="Draw {{ label }}">
         </span>
-        <span class="block font-display text-lg font-bold text-white mt-1 tabular">{{ val }}</span>
-        <span class="block text-[11px] tabular" style="color:#9fb3d1">before {{ fmtv(key, c.before) }}</span>
-        <span class="block text-[11px] tabular font-semibold" style="color: {{ '#7d93b5' if pct is none or key == 'spend' or (pct|abs) < 1 else ('#3ddc6a' if good else '#ff8a80') }}">{{ ('%+.0f%% after vs before'|format(pct)) if pct is not none else 'no before data' }}</span>
+        <span class="block font-display text-lg font-bold text-white mt-1 tabular">{{ fmtv(key, t[key]) }}</span>
+        <span class="block text-[11px] tabular" style="color:#9fb3d1">previous: {{ fmtv(key, channel.prev_totals[key]) }}</span>
+        <span class="block text-[11px] tabular font-semibold" style="color: {{ '#7d93b5' if pct is none or key == 'spend' or (pct|abs) < 1 else ('#3ddc6a' if good else '#ff8a80') }}">{{ ('%+.0f%% vs previous'|format(pct)) if pct is not none else 'no earlier data' }}</span>
       </label>
       {% endfor %}
     </div>
-    <div class="text-[11px] mb-1" style="color:#7d93b5">Chart: {{ channel.range.start.strftime('%d %b') }} &ndash; {{ channel.range.end.strftime('%d %b %Y') }} &middot; grey band = before window, coloured band = after window, line = {{ channel.cutover_date.strftime('%d %b') }}</div>
+    <div class="text-[11px] mb-1" style="color:#7d93b5">Chart: the date range above. If the action date ({{ channel.cutover_date.strftime('%d %b') }}) falls inside it: grey band = before window, blue band = after window, orange line = the action date.</div>
     <div style="height:280px"><canvas id="channelChart"></canvas></div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] mt-2" style="color:#9fb3d1">
       <span>Each ticked card is one line, on its own scale (the first two show their axis)</span>
@@ -280,64 +277,50 @@
     {% endif %}
   </div>
 
-  <div class="grid sm:grid-cols-2 gap-4">
-    <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
-      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">Before &middot; {{ channel.window_days }} days up to {{ channel.cutover_date }}</div>
-      <div class="font-display text-2xl font-bold text-white">{{ channel.before_after.before.roas if channel.before_after.before.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span></div>
-      <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.before.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.before.sales) }} sales &middot; {{ channel.before_after.before.days }} days</div>
+  {% set w, cmp, ab, ob = channel.windows, channel.compare, channel.before_after, channel.others_before_after %}
+  <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
+    <div class="text-sm font-semibold text-white">Before vs after the action date &middot; {{ channel.cutover_date.strftime('%d %b %Y') }}</div>
+    <div class="text-xs mt-1 mb-3" style="color:#9fb3d1">
+      Before = {{ w.before_start.strftime('%d %b') }} &ndash; {{ w.before_end.strftime('%d %b') }} ({{ ab.before.days }} day{{ 's' if ab.before.days != 1 }} counted)
+      &middot; After = {{ w.after_start.strftime('%d %b') }} &ndash; {{ w.after_end.strftime('%d %b') }} ({{ ab.after.days }} day{{ 's' if ab.after.days != 1 }} counted)
+      &middot; {{ {'bau': 'BAU days', 'event': 'event days', 'all': 'all days'}[channel.days_mode] }}
+      &middot; set by "Action date" and "Compare window" above, not by the date range.
     </div>
-    <div class="rounded-xl p-4" style="background:rgba(255,255,255,.05)">
-      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#7d93b5">{{ ('After (AI)' if channel.scope == 'ai' else 'After') if channel.decisions_on_cutover else 'Since (nothing implemented)' }} &middot; {{ channel.cutover_date }}</div>
-      <div class="font-display text-2xl font-bold" style="color: {{ ('#3ddc6a' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas > channel.before_after.before.roas else '#ff8a80' if channel.before_after.after.roas and channel.before_after.before.roas and channel.before_after.after.roas < channel.before_after.before.roas else '#fff') if channel.decisions_on_cutover else '#fff' }}">
-        {{ channel.before_after.after.roas if channel.before_after.after.roas is not none else '-' }} <span class="text-sm font-normal" style="color:#9fb3d1">ROAS</span>
-      </div>
-      <div class="text-xs mt-1" style="color:#9fb3d1">&#8377;{{ '{:,.0f}'.format(channel.before_after.after.spend) }} spend &middot; &#8377;{{ '{:,.0f}'.format(channel.before_after.after.sales) }} sales &middot; {{ channel.before_after.after.days }} days</div>
-      {% set ob = channel.others_before_after %}
-      {% if ob and ob.before.roas and ob.after.roas %}
-      <div class="text-xs mt-2 pt-2" style="color:#9fb3d1;border-top:1px solid rgba(255,255,255,.08)">
-        Other campaigns over the same days: {{ ob.before.roas }} &rarr; {{ ob.after.roas }}
-        ({{ '%+.0f%%'|format(((ob.after.roas / ob.before.roas) - 1) * 100) }})
-        {% set ab = channel.before_after %}
-        {% if ab.before.roas and ab.after.roas %}
-        &middot; AI campaigns {{ '%+.0f%%'|format(((ab.after.roas / ab.before.roas) - 1) * 100) }}
-        {% endif %}
-      </div>
-      {% endif %}
-    </div>
-  </div>
-
-  {% set ab = channel.before_after %}
-  <div class="rounded-xl mt-4 overflow-x-auto" style="background:rgba(255,255,255,.05)">
+    <div class="overflow-x-auto">
     <table class="w-full text-xs tabular" style="color:#c7d5ea">
       <thead><tr style="color:#7d93b5">
-        <th class="text-left font-semibold px-4 py-2">{{ channel.window_days }} days before vs from {{ channel.cutover_date }}</th>
-        {% for label in ['Spend','Sales','ROAS','Impressions','CTR','Add to carts','CPM'] %}<th class="text-right font-semibold px-3 py-2">{{ label }}</th>{% endfor %}
+        <th class="text-left font-semibold px-3 py-2">Per day</th>
+        {% for k, label in [('spend','Spend'),('sales','Sales'),('roas','ROAS'),('impressions','Impressions'),('atc','Add to carts'),('units','Qty sold'),('ctr','CTR'),('cpm','CPM')] %}<th class="text-right font-semibold px-3 py-2">{{ label }}</th>{% endfor %}
       </tr></thead>
       <tbody>
-        {% for side, row in [('Before', ab.before), ('After', ab.after)] %}
+        {% for side in ['before', 'after'] %}
         <tr style="border-top:1px solid rgba(255,255,255,.07)">
-          <td class="px-4 py-2 text-white font-medium">{{ side }}</td>
-          <td class="px-3 py-2 text-right">&#8377;{{ '{:,.0f}'.format(row.spend) }}</td>
-          <td class="px-3 py-2 text-right">&#8377;{{ '{:,.0f}'.format(row.sales) }}</td>
-          <td class="px-3 py-2 text-right">{{ row.roas if row.roas is not none else '-' }}</td>
-          <td class="px-3 py-2 text-right">{{ '{:,}'.format(row.impressions) }}</td>
-          <td class="px-3 py-2 text-right">{{ '%.2f%%'|format(row.ctr) if row.ctr is not none else '-' }}</td>
-          <td class="px-3 py-2 text-right">{{ '{:,}'.format(row.atc) }}</td>
-          <td class="px-3 py-2 text-right">{{ ('&#8377;%.0f'|format(row.cpm))|safe if row.cpm is not none else '-' }}</td>
+          <td class="px-3 py-2 text-white font-medium">{{ side|capitalize }}</td>
+          {% for k in ['spend','sales','roas','impressions','atc','units','ctr','cpm'] %}<td class="px-3 py-2 text-right">{{ fmtv(k, cmp[k][side]) }}</td>{% endfor %}
         </tr>
         {% endfor %}
         <tr style="border-top:1px solid rgba(255,255,255,.07)">
-          <td class="px-4 py-2" style="color:#7d93b5">Change</td>
-          {% for k in ['spend','sales','roas','impressions','ctr','atc','cpm'] %}
-          {% set b, a = ab.before[k], ab.after[k] %}
-          {% set pct = ((a / b - 1) * 100) if (b and a is not none) else none %}
-          {% set good = (pct is not none) and ((pct > 0) != (k == 'cpm')) %}
+          <td class="px-3 py-2" style="color:#7d93b5">Change</td>
+          {% for k in ['spend','sales','roas','impressions','atc','units','ctr','cpm'] %}
+          {% set pct = cmp[k].pct %}{% set good = pct is not none and ((pct > 0) != (k == 'cpm')) %}
           <td class="px-3 py-2 text-right font-semibold" style="color: {{ '#9fb3d1' if pct is none or (pct|abs) < 1 or k == 'spend' else ('#3ddc6a' if good else '#ff8a80') }}">{{ '%+.0f%%'|format(pct) if pct is not none else '-' }}</td>
           {% endfor %}
         </tr>
       </tbody>
     </table>
-    <div class="px-4 pb-2 text-[11px]" style="color:#7d93b5">Green = better (for CPM, lower is better). Spend change is shown without a colour: more or less spend is a choice, not a result.</div>
+    </div>
+    {% if ob and ob.before.roas and ob.after.roas and ab.before.roas and ab.after.roas %}
+    <div class="text-xs mt-3 pt-3" style="color:#c7d5ea;border-top:1px solid rgba(255,255,255,.08)">
+      <b class="text-white">Same days, other campaigns</b> (the brand's keyword campaigns the AI never ran):
+      ROAS {{ ob.before.roas }} &rarr; {{ ob.after.roas }} ({{ '%+.0f%%'|format(((ob.after.roas / ob.before.roas) - 1) * 100) }})
+      against the AI campaigns' {{ ab.before.roas }} &rarr; {{ ab.after.roas }} ({{ '%+.0f%%'|format(((ab.after.roas / ab.before.roas) - 1) * 100) }}).
+      The gap between the two is what the AI changed; what both did is the market.
+    </div>
+    {% endif %}
+    {% if ab.after.days < channel.window_days %}
+    <div class="text-[11px] mt-2" style="color:#f5c975">Only {{ ab.after.days }} of {{ channel.window_days }} after-days counted so far{{ ' (or some were event days)' if channel.days_mode == 'bau' else '' }}; the last ~{{ channel.settling_days }} days are still filling in.</div>
+    {% endif %}
+    <div class="text-[11px] mt-2" style="color:#7d93b5">Per day so a shorter after-window or left-out event days do not distort it. Green = better (CPM: lower is better); spend has no colour.</div>
   </div>
 
   {% if channel.scoreboard %}
@@ -389,12 +372,6 @@
   </div>
   {% endif %}
 
-  {% if channel.before_after.after_is_partial %}
-  <div class="rounded-lg mt-4 px-3 py-2.5 text-xs flex items-start gap-2" style="background:rgba(250,178,25,.12); color:#fddc9a;">
-    <svg class="w-4 h-4 flex-none mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
-    <div>Only <strong>{{ channel.before_after.after.days }} of {{ channel.window_days }}</strong> "after" days have landed so far &mdash; and Blinkit keeps adding sales to the last ~{{ channel.settling_days }} days. Treat this ROAS as provisional; it can still move once the full window and final data are in.</div>
-  </div>
-  {% endif %}
 </div>
 {% endif %}
 
