@@ -33,11 +33,11 @@
       {% endif %}
       <div class="flex rounded-lg overflow-hidden border mt-3 w-max" style="border-color:rgba(255,255,255,.15)">
         {% if channel.ai_campaign_count %}
-        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='ai', campaigns=channel.campaigns_arg, range=channel.range.preset, **({'from': channel.range.start, 'to': channel.range.end} if channel.range.preset == 'custom' else {})) }}" data-soft
+        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='ai', campaigns=channel.campaigns_arg, days=channel.days_mode, range=channel.range.preset, **({'from': channel.range.start, 'to': channel.range.end} if channel.range.preset == 'custom' else {})) }}" data-soft
            class="text-xs font-semibold px-3 py-1.5"
            style="{{ 'background:var(--brand);color:#fff;' if channel.scope == 'ai' else 'background:rgba(255,255,255,.06);color:#9fb3d1;' }}">AI-managed campaigns</a>
         {% endif %}
-        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='all', range=channel.range.preset, **({'from': channel.range.start, 'to': channel.range.end} if channel.range.preset == 'custom' else {})) }}" data-soft
+        <a href="{{ url_for('roas', brand=brand, since_days=since_days, cutover=channel.cutover_date, window_days=channel.window_days, granularity=channel.granularity, scope='all', days=channel.days_mode, range=channel.range.preset, **({'from': channel.range.start, 'to': channel.range.end} if channel.range.preset == 'custom' else {})) }}" data-soft
            class="text-xs font-semibold px-3 py-1.5"
            style="{{ 'background:var(--brand);color:#fff;' if channel.scope == 'all' else 'background:rgba(255,255,255,.06);color:#9fb3d1;' }}">Whole channel</a>
       </div>
@@ -53,6 +53,7 @@
           <input type="hidden" name="cutover" value="{{ channel.cutover_date }}">
           <input type="hidden" name="window_days" value="{{ channel.window_days }}">
           <input type="hidden" name="granularity" value="{{ channel.granularity }}">
+          <input type="hidden" name="days" value="{{ channel.days_mode }}">
           <input type="hidden" name="scope" value="ai">
           <input type="hidden" name="range" value="{{ channel.range.preset }}">
           <input type="hidden" name="from" value="{{ channel.range.start }}">
@@ -128,6 +129,17 @@
         {% endfor %}
       </select>
     </div>
+    <div>
+      <label class="text-[11px] uppercase tracking-wide block mb-1" style="color:#7d93b5">Days</label>
+      <input type="hidden" name="days" value="{{ channel.days_mode }}">
+      <div class="flex rounded-lg overflow-hidden border" style="border-color:rgba(255,255,255,.15)" role="group" aria-label="Which days to count">
+        {% for m, label, tip in [('bau', 'BAU only', 'Normal days: event days left out'), ('event', 'Event days', 'Only the days marked as events'), ('all', 'All days', 'Every day, events included')] %}
+        <button type="submit" title="{{ tip }}" onclick="this.form.days.value='{{ m }}'"
+                class="text-xs font-semibold px-3 py-1.5"
+                style="{{ 'background:var(--brand);color:#fff;' if channel.days_mode == m else 'background:rgba(255,255,255,.06);color:#9fb3d1;' }}">{{ label }}</button>
+        {% endfor %}
+      </div>
+    </div>
     <div class="flex rounded-lg overflow-hidden border" style="border-color:rgba(255,255,255,.15)">
       {% for g in ['day','week','month'] %}
       <button type="submit" name="granularity" value="{{ g }}" class="text-xs font-semibold px-3 py-1.5 capitalize"
@@ -135,6 +147,51 @@
       {% endfor %}
     </div>
   </form>
+
+  <details class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)" {{ 'open' if channel.event_suggestions else '' }}>
+    <summary class="cursor-pointer text-sm font-semibold text-white flex flex-wrap items-center gap-2">
+      Event days &middot; {{ brand }}
+      <span class="font-normal text-xs" style="color:#9fb3d1">
+        {% if channel.days_mode == 'bau' %}Showing BAU (normal) days only: {{ channel.event_days_in_range }} event day(s) in this range are left out of every number on this page.
+        {% elif channel.days_mode == 'event' %}Showing event days only ({{ channel.event_days_in_range }} in this range).
+        {% else %}Showing all days, events included ({{ channel.event_days_in_range }} event day(s) in this range).{% endif %}
+      </span>
+      {% if channel.event_suggestions %}<span class="text-[11px] font-bold rounded-full px-2 py-0.5" style="background:#F2A65A;color:#14213D">{{ channel.event_suggestions|length }} to check</span>{% endif %}
+    </summary>
+    <p class="text-xs mt-2 mb-3" style="color:#7d93b5">A festival or sale lifts every campaign, AI or not, so comparing a sale week with a normal week measures the calendar, not the AI. Mark such periods here; "BAU only" then leaves them out.</p>
+    <div class="flex flex-wrap gap-2 mb-3">
+      {% for e in channel.events %}
+      <span class="inline-flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs" style="background:rgba(255,255,255,.08);color:#e6edf7">
+        <b>{{ e.name }}</b> {{ e.start_date.strftime('%d %b') }}{% if e.end_date != e.start_date %} &ndash; {{ e.end_date.strftime('%d %b %Y') }}{% else %} {{ e.start_date.strftime('%Y') }}{% endif %}
+        <button type="button" title="Remove this event" aria-label="Remove {{ e.name }}" onclick='removeEvent({{ e.id }}, {{ e.name|tojson }})' style="color:#ff8a80">&times;</button>
+      </span>
+      {% else %}
+      <span class="text-xs" style="color:#7d93b5">No events marked for {{ brand }} yet.</span>
+      {% endfor %}
+    </div>
+    {% if channel.event_suggestions %}
+    <div class="mb-3">
+      <div class="text-[11px] uppercase tracking-wide mb-1" style="color:#F2A65A">Looks like an event (sales far above the previous 4 weeks)</div>
+      <div class="flex flex-wrap gap-2">
+        {% for sg in channel.event_suggestions %}
+        <button type="button" onclick="markEvent('{{ sg.start_date }}', '{{ sg.end_date }}')"
+                class="text-xs rounded-lg px-2.5 py-1 border" style="border-color:#F2A65A;color:#F2A65A">
+          {{ sg.start_date.strftime('%d %b') }}{% if sg.days > 1 %} &ndash; {{ sg.end_date.strftime('%d %b') }}{% endif %} &middot; sales &times;{{ sg.peak }} &middot; Mark as event
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <form onsubmit="addEvent(event)" class="flex flex-wrap items-end gap-2">
+      <div><label class="text-[11px] block mb-1" style="color:#7d93b5">Event</label>
+        <input id="evName" required maxlength="80" placeholder="e.g. Diwali sale" class="rounded-lg text-sm px-2.5 py-1 border" style="background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.15)"></div>
+      <div><label class="text-[11px] block mb-1" style="color:#7d93b5">From</label>
+        <input id="evFrom" type="date" required class="rounded-lg text-sm px-2.5 py-1 border" style="background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.15);color-scheme:dark"></div>
+      <div><label class="text-[11px] block mb-1" style="color:#7d93b5">To</label>
+        <input id="evTo" type="date" class="rounded-lg text-sm px-2.5 py-1 border" style="background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.15);color-scheme:dark"></div>
+      <button class="text-xs font-semibold rounded-lg px-3 py-1.5 text-white" style="background:var(--brand)">Add event</button>
+    </form>
+  </details>
 
   <div class="rounded-xl p-4 mb-4" style="background:rgba(255,255,255,.05)">
     {% set t, vp = channel.totals, channel.vs_prev %}
@@ -498,6 +555,25 @@
 const trend = {{ channel.trend|tojson }};
 const cutoverLabel = {{ channel.cutover_label|tojson }};
 const isDayView = {{ (channel.granularity == 'day')|tojson }};
+const EVENT_BRAND = {{ brand|tojson }};
+async function addEvent(ev) {
+  ev.preventDefault();
+  const name = document.getElementById('evName').value, from = document.getElementById('evFrom').value;
+  const to = document.getElementById('evTo').value || from;
+  try { await postJSON('/api/event-days', { brand: EVENT_BRAND, name, start_date: from, end_date: to });
+        toast('Event added', true); setTimeout(() => location.reload(), 500); } catch (e) {}
+}
+async function markEvent(from, to) {
+  const name = prompt(`Name this event (${from} to ${to}), e.g. "Diwali sale":`);
+  if (!name) return;
+  try { await postJSON('/api/event-days', { brand: EVENT_BRAND, name, start_date: from, end_date: to, source: 'suggested' });
+        toast('Event added', true); setTimeout(() => location.reload(), 500); } catch (e) {}
+}
+async function removeEvent(id, name) {
+  if (!confirm(`Remove the event "${name}"? Its days count as normal (BAU) days again.`)) return;
+  try { await postJSON(`/api/event-days/${id}/remove`, {}); toast('Event removed', true);
+        setTimeout(() => location.reload(), 500); } catch (e) {}
+}
 const hadDecisions = {{ ((channel.decisions_on_cutover or 0) > 0) | tojson }};
 const aiScope = {{ (channel.scope == 'ai') | tojson }};
 const settlingFrom = {{ channel.settling_from | tojson }};

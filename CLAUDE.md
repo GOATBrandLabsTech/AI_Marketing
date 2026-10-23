@@ -156,6 +156,13 @@ Never run or re-run the push notebook to "see an error" - it is live (`DRY_RUN =
 - Chat tab hides for brand-limited accounts only if the portal passes a header named in env
   `PORTAL_ALL_BRANDS_HEADER` (value "false" = limited); the portal itself also blocks /chat for them.
 
+## BAU vs event days (`webapp/event_days.py`, 2026-10-23)
+- Event periods per brand in `voylla.blinkit_event_days` (seeded: Voylla Rakhi 20-29 Aug, I-Day 15 Aug, Navratri
+  10-19 Oct; Chumbak Rakhi 24-30 Aug, I-Day 15-16 Aug). Ads Performance `days=bau|event|all`, default BAU: event
+  days are left out of totals, before/after, trend, AI-vs-rest and the campaign table (SQL filter in
+  `fetch_campaign_scoreboard`). The page suggests spikes (sales >= 1.6x the previous 28 days' median) to mark.
+- Why: with all days Voylla's AI looked -6% vs the rest +13% (Navratri in the after window); BAU only: -2% vs -13%.
+
 ## Open items (next session)
 - Chumbak 607168 malformed reply (13-14 Oct, "Recovered N objects", rest backfilled at 0.70 -> REVIEW): fixed
   2026-10-14 in `generate_ondemand_suggestions` - Sonnet 5.5 thinks by default and thinking counts against

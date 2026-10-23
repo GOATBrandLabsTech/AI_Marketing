@@ -230,10 +230,28 @@ def roas():
         # festive week lifts everything, and should not be credited to the AI
         daily_others = (queries.fetch_channel_daily(brand, days=365, exclude_ids=ai_ids)
                         if scope == "ai" else [])
+        # BAU vs event days: a festival or sale lifts every campaign, so by
+        # default the page leaves event days out of every number below
+        import event_days
+        from db import get_engine
+        try:   # the event list must never take the page down (e.g. no database login)
+            events = event_days.list_events(get_engine(), brand)
+        except Exception:
+            events = []
+        ev_dates = event_days.dates_of(events)
+        days_mode = event_days.clean_mode(request.args.get("days"))
+        brand_daily = daily_channel if scope == "all" else queries.fetch_channel_daily(brand, days=365)
+        suggestions = [s_ for s_ in event_days.suggest_events(brand_daily, ev_dates)
+                       if s_["start_date"] >= date.today() - timedelta(days=180)][:6]
+        all_channel_days = daily_channel
+        daily_channel = event_days.apply_mode(daily_channel, ev_dates, days_mode)
+        daily_others = event_days.apply_mode(daily_others, ev_dates, days_mode)
         # the trend's date range, like Blinkit's own dashboard: presets or custom
         range_preset, chart_start, chart_end = queries.resolve_range(
             request.args.get("range"), request.args.get("from"), request.args.get("to"), date.today())
         span = (chart_end - chart_start).days + 1
+        event_days_in_range = sum(1 for d in all_channel_days
+                                  if chart_start <= d["date"] <= chart_end and d["date"] in ev_dates)
         totals = queries.period_totals(daily_channel, chart_start, chart_end)
         prev_totals = queries.period_totals(daily_channel, chart_start - timedelta(days=span),
                                             chart_start - timedelta(days=1))
@@ -279,8 +297,13 @@ def roas():
             "settling_from": str(date.today() - timedelta(days=SETTLING_DAYS)),
             "settling_days": SETTLING_DAYS,
             "decisions_on_cutover": queries.count_ondemand_decisions_on_date(brand, cutover_date),
-            "scoreboard": (queries.fetch_campaign_scoreboard(brand, selected_ids, cutover_date, window_days)
+            "scoreboard": (queries.fetch_campaign_scoreboard(brand, selected_ids, cutover_date, window_days,
+                                                             event_dates=ev_dates, days_mode=days_mode)
                            if scope == "ai" else []),
+            "days_mode": days_mode,
+            "events": events,
+            "event_days_in_range": event_days_in_range,
+            "event_suggestions": suggestions,
         }
         if channel["scoreboard"]:
             sparks = queries.fetch_campaign_roas_daily(brand, selected_ids, days=30)
@@ -303,6 +326,34 @@ def roas():
         verdict_settle_days=queries.VERDICT_SETTLE_DAYS,
         active="roas",
     )
+
+
+@app.route("/api/event-days", methods=["POST"])
+@login_required
+def api_event_days_add():
+    """Marks a period as an event (festival, sale) for one brand, so Ads
+    Performance can show BAU days only."""
+    import event_days
+    from db import get_engine
+    p = request.get_json(force=True) or {}
+    try:
+        start = date.fromisoformat(str(p.get("start_date")))
+        end = date.fromisoformat(str(p.get("end_date") or p.get("start_date")))
+        new_id = event_days.add_event(get_engine(), p.get("brand") or current_brand(), p.get("name"), start, end,
+                                      by=current_brand(), source=p.get("source") or "manual")
+    except ValueError as exc:
+        return jsonify({"error": str(exc) if "isoformat" not in str(exc) else "Dates must be YYYY-MM-DD."}), 400
+    return jsonify({"ok": True, "id": new_id})
+
+
+@app.route("/api/event-days/<int:event_id>/remove", methods=["POST"])
+@login_required
+def api_event_days_remove(event_id):
+    import event_days
+    from db import get_engine
+    if not event_days.remove_event(get_engine(), event_id):
+        return jsonify({"error": "event not found"}), 404
+    return jsonify({"ok": True})
 
 
 @app.route("/roas.csv")

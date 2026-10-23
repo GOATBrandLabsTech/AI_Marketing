@@ -620,7 +620,7 @@ def fetch_ai_managed_campaign_ids(brand):
         return sorted(int(r["campaign_id"]) for r in cur.fetchall())
 
 
-def fetch_campaign_scoreboard(brand, campaign_ids, cutover_date, window_days=7):
+def fetch_campaign_scoreboard(brand, campaign_ids, cutover_date, window_days=7, event_dates=None, days_mode="all"):
     """One row per AI campaign: spend and ROAS in the window_days before the
     cutover vs from the cutover on, and the bid changes the AI pushed in that
     after-window (raised / cut / paused). Biggest after-spend first."""
@@ -639,6 +639,10 @@ def fetch_campaign_scoreboard(brand, campaign_ids, cutover_date, window_days=7):
                 FROM (SELECT *, TO_TIMESTAMP("Date", 'YYYY-MM-DD HH24:MI:SS')::date AS d
                       FROM voylla."Blinkit_Ads_Report" WHERE "Brand" = %(brand)s) a
                 WHERE "Campaign ID"::text = ANY(%(ids)s) AND d >= %(b0)s AND d < %(a1)s
+                  -- BAU / event view: event days left out (bau) or kept alone (event)
+                  AND (%(mode)s = 'all'
+                       OR (%(mode)s = 'bau' AND NOT (d = ANY(%(ev)s::date[])))
+                       OR (%(mode)s = 'event' AND d = ANY(%(ev)s::date[])))
                 GROUP BY 1
             ),
             bids AS (
@@ -659,6 +663,8 @@ def fetch_campaign_scoreboard(brand, campaign_ids, cutover_date, window_days=7):
             ORDER BY COALESCE(p.spend_after, 0) DESC
             """,
             {"brand": brand, "ids": [str(i) for i in campaign_ids], "cut": cutover_date,
+             "mode": days_mode if days_mode in ("bau", "event") else "all",
+             "ev": sorted(event_dates or []),
              "b0": cutover_date - timedelta(days=window_days), "a1": cutover_date + timedelta(days=window_days)},
         )
         rows = cur.fetchall()
