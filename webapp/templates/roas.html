@@ -243,7 +243,7 @@
     <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
       <div class="text-sm font-semibold text-white">Date range &middot; {{ channel.range.start.strftime('%d %b') }} &ndash; {{ channel.range.end.strftime('%d %b %Y') }}
         <span class="font-normal" style="color:#9fb3d1">({{ channel.range.days }} days, {{ t.days }} counted &middot; {{ {'bau': 'BAU days', 'event': 'event days', 'all': 'all days'}[channel.days_mode] }})</span></div>
-      <div class="text-[11px]" style="color:#7d93b5">Totals for the date range you picked. % = vs the {{ channel.range.days }} days just before it ({{ pr.start.strftime('%d %b') }} &ndash; {{ pr.end.strftime('%d %b') }}). Tick cards to draw them.</div>
+      <div class="text-[11px]" style="color:#7d93b5">Each card = the total for {{ channel.range.start.strftime('%d %b') }} &ndash; {{ channel.range.end.strftime('%d %b') }}. &ldquo;previous&rdquo; and the % = vs {{ pr.start.strftime('%d %b') }} &ndash; {{ pr.end.strftime('%d %b %Y') }} (the {{ channel.range.days }} days just before your range). The action date does not change the cards. Tick cards to draw them.</div>
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 mb-4" role="group" aria-label="Metrics to draw">
       {% macro fmtv(key, v) %}{% if v is none %}-{% elif key in ('spend', 'sales') %}&#8377;{{ '{:,.0f}'.format(v) }}{% elif key == 'cpm' %}&#8377;{{ '%.0f'|format(v) }}{% elif key == 'ctr' %}{{ '%.2f%%'|format(v) }}{% elif key == 'roas' %}{{ '%.2f'|format(v) }}{% else %}{{ '{:,.0f}'.format(v) }}{% endif %}{% endmacro %}
@@ -289,18 +289,22 @@
     <div class="overflow-x-auto">
     <table class="w-full text-xs tabular" style="color:#c7d5ea">
       <thead><tr style="color:#7d93b5">
-        <th class="text-left font-semibold px-3 py-2">Per day</th>
+        <th class="text-left font-semibold px-3 py-2"></th>
         {% for k, label in [('spend','Spend'),('sales','Sales'),('roas','ROAS'),('impressions','Impressions'),('atc','Add to carts'),('units','Qty sold'),('ctr','CTR'),('cpm','CPM')] %}<th class="text-right font-semibold px-3 py-2">{{ label }}</th>{% endfor %}
       </tr></thead>
       <tbody>
         {% for side in ['before', 'after'] %}
         <tr style="border-top:1px solid rgba(255,255,255,.07)">
-          <td class="px-3 py-2 text-white font-medium">{{ side|capitalize }}</td>
-          {% for k in ['spend','sales','roas','impressions','atc','units','ctr','cpm'] %}<td class="px-3 py-2 text-right">{{ fmtv(k, cmp[k][side]) }}</td>{% endfor %}
+          <td class="px-3 pt-2 text-white font-medium">{{ side|capitalize }} &middot; total of {{ ab[side].days }} day{{ 's' if ab[side].days != 1 }}</td>
+          {% for k in ['spend','sales','roas','impressions','atc','units','ctr','cpm'] %}<td class="px-3 pt-2 text-right text-white">{{ fmtv(k, ab[side][k] if k in ('spend','sales','impressions','atc','units') else cmp[k][side]) }}</td>{% endfor %}
+        </tr>
+        <tr>
+          <td class="px-3 pb-2" style="color:#7d93b5">&nbsp;&nbsp;average per day</td>
+          {% for k in ['spend','sales','roas','impressions','atc','units','ctr','cpm'] %}<td class="px-3 pb-2 text-right" style="color:#9fb3d1">{{ fmtv(k, cmp[k][side]) if k in ('spend','sales','impressions','atc','units') else '' }}</td>{% endfor %}
         </tr>
         {% endfor %}
         <tr style="border-top:1px solid rgba(255,255,255,.07)">
-          <td class="px-3 py-2" style="color:#7d93b5">Change</td>
+          <td class="px-3 py-2" style="color:#7d93b5">Change (per day)</td>
           {% for k in ['spend','sales','roas','impressions','atc','units','ctr','cpm'] %}
           {% set pct = cmp[k].pct %}{% set good = pct is not none and ((pct > 0) != (k == 'cpm')) %}
           <td class="px-3 py-2 text-right font-semibold" style="color: {{ '#9fb3d1' if pct is none or (pct|abs) < 1 or k == 'spend' else ('#3ddc6a' if good else '#ff8a80') }}">{{ '%+.0f%%'|format(pct) if pct is not none else '-' }}</td>
@@ -320,7 +324,7 @@
     {% if ab.after.days < channel.window_days %}
     <div class="text-[11px] mt-2" style="color:#f5c975">Only {{ ab.after.days }} of {{ channel.window_days }} after-days counted so far{{ ' (or some were event days)' if channel.days_mode == 'bau' else '' }}; the last ~{{ channel.settling_days }} days are still filling in.</div>
     {% endif %}
-    <div class="text-[11px] mt-2" style="color:#7d93b5">Per day so a shorter after-window or left-out event days do not distort it. Green = better (CPM: lower is better); spend has no colour.</div>
+    <div class="text-[11px] mt-2" style="color:#7d93b5">The change is worked out on the average per day, so a shorter after side or left-out event days do not distort it. Green = better (CPM: lower is better); spend has no colour.</div>
   </div>
 
   {% if channel.scoreboard %}
