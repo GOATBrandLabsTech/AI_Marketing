@@ -178,6 +178,10 @@ def roas():
         default_cutover = (date.fromisoformat(settled[0]) if settled
                            else date.fromisoformat(action_dates[0]) if action_dates
                            else date.today() - timedelta(days=1))
+        # the AI go-live date is the natural "before vs after" line, so it is the default
+        milestones = queries.AI_MILESTONES.get(brand, [])
+        if milestones:
+            default_cutover = milestones[0][0]
         cutover_arg = request.args.get("cutover")
         cutover_date = date.fromisoformat(cutover_arg) if cutover_arg else default_cutover
 
@@ -217,7 +221,14 @@ def roas():
         # whenever there are any); "all" = the whole channel. Comparing the
         # whole channel before/after an AI date credits or blames the AI for
         # campaigns it never touched.
-        ai_ids = queries.fetch_ai_managed_campaign_ids(brand)
+        # every campaign the AI has ever run (kept out of the "other campaigns" line),
+        # and the live ones - a STOPPED campaign is not offered or counted
+        ai_all = queries.fetch_ai_managed_campaign_ids(brand)
+        try:   # never let the stopped-campaign lookup take the page down
+            stopped_ids = queries.fetch_stopped_campaign_ids(ai_all)
+        except Exception:
+            stopped_ids = []
+        ai_ids = [i for i in ai_all if i not in stopped_ids]
         scope = request.args.get("scope") or ("ai" if ai_ids else "all")
         if scope not in ("ai", "all") or (scope == "ai" and not ai_ids):
             scope = "all"
@@ -228,7 +239,7 @@ def roas():
         daily_channel = queries.fetch_channel_daily(brand, days=365, campaign_ids=campaign_ids)
         # the brand's campaigns the AI does not run, as the comparison line: a
         # festive week lifts everything, and should not be credited to the AI
-        daily_others = (queries.fetch_channel_daily(brand, days=365, exclude_ids=ai_ids)
+        daily_others = (queries.fetch_channel_daily(brand, days=365, exclude_ids=ai_all)
                         if scope == "ai" else [])
         # BAU vs event days: a festival or sale lifts every campaign, so by
         # default the page leaves event days out of every number below
@@ -248,7 +259,7 @@ def roas():
         daily_others = event_days.apply_mode(daily_others, ev_dates, days_mode)
         # the trend's date range, like Blinkit's own dashboard: presets or custom
         range_preset, chart_start, chart_end = queries.resolve_range(
-            request.args.get("range"), request.args.get("from"), request.args.get("to"), date.today())
+            request.args.get("range"), request.args.get("from"), request.args.get("to"), date.today(), cutover_date)
         span = (chart_end - chart_start).days + 1
         event_days_in_range = sum(1 for d in all_channel_days
                                   if chart_start <= d["date"] <= chart_end and d["date"] in ev_dates)
@@ -271,13 +282,17 @@ def roas():
         else:
             cutover_label = str(cutover_date)
 
+        before_after = queries.channel_before_after(daily_channel, cutover_date, window_days)
         channel = {
+            "compare": queries.cutover_compare(before_after),
+            "windows": queries.cutover_windows(cutover_date, window_days, date.today()),
+            "stopped_ids": stopped_ids,
             "trend": trend,
             "range": {"preset": range_preset, "start": chart_start, "end": chart_end, "days": span,
                       "presets": queries.RANGE_PRESETS},
             "totals": totals,
             "vs_prev": queries.compare_totals(totals, prev_totals),
-            "before_after": queries.channel_before_after(daily_channel, cutover_date, window_days),
+            "before_after": before_after,
             "others_before_after": (queries.channel_before_after(daily_others, cutover_date, window_days)
                                     if daily_others else None),
             "campaign_options": queries.fetch_ai_campaign_options(brand, ai_ids),
